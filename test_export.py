@@ -7,11 +7,13 @@ Run: python -m pytest
 from __future__ import annotations
 
 import importlib
+import json
 
 from md2wiki import LinkResolver, markdown_to_wikitext
 
 extract = importlib.import_module("02_extract")
 generate = importlib.import_module("03_generate")
+upload = importlib.import_module("04_upload")
 
 
 _RESOLVER = LinkResolver(
@@ -121,3 +123,29 @@ def test_generate_proposals_writes_wikitext_diff_and_new_pages():
     assert "Lindo Laut.diff" not in outputs
     assert "NEW_PAGES.md" in outputs
     assert "Lindo Laut" in outputs["NEW_PAGES.md"]
+
+
+# --- stage 4: upload gate ----------------------------------------------------
+
+
+def test_upload_only_targets_update_pages(tmp_path, monkeypatch):
+    """The agent must never create pages: only 'update' plan entries upload."""
+
+    cache = tmp_path / "wiki_cache"
+    cache.mkdir()
+    (cache / "entities.json").write_text(
+        json.dumps(
+            [
+                {"wiki_title": "Die Hexe", "action": "update"},
+                {"wiki_title": "Lindo Laut", "action": "create"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(upload.config, "WIKI_CACHE_DIR", cache)
+    assert upload._update_titles() == {"Die Hexe"}
+
+
+def test_upload_titles_none_without_plan(tmp_path, monkeypatch):
+    monkeypatch.setattr(upload.config, "WIKI_CACHE_DIR", tmp_path / "missing")
+    assert upload._update_titles() is None
