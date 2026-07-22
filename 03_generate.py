@@ -27,6 +27,7 @@ import requests
 import config
 from md2wiki import LinkResolver, markdown_to_wikitext
 from wiki_client import WikiClient
+from wikimerge import merge_wikitext
 
 
 def load_plan() -> list[dict]:
@@ -58,23 +59,32 @@ def generate_proposals(
         if body is None:
             continue
         category = config.CATEGORY_BY_TYPE.get(entity["type"] or "")
-        wikitext = markdown_to_wikitext(body, resolver, category)
+        kb_wikitext = markdown_to_wikitext(body, resolver, category)
         safe_title = entity["wiki_title"].replace("/", "_")
-        outputs[f"{safe_title}.wikitext"] = wikitext
 
         if entity["action"] == "update":
             live = live_pages.get(entity["wiki_title"], "")
+            # Additive merge: never delete hand-authored content. With no live
+            # copy fetched, fall back to the KB text (the diff makes that
+            # obvious to the reviewer).
+            wikitext = (
+                merge_wikitext(live, kb_wikitext, entity["wiki_title"])
+                if live
+                else kb_wikitext
+            )
+            outputs[f"{safe_title}.wikitext"] = wikitext
             diff = "\n".join(
                 difflib.unified_diff(
                     live.splitlines(),
                     wikitext.splitlines(),
-                    fromfile=f"wiki/{entity['wiki_title']}",
-                    tofile=f"kb/{entity['concept']}",
+                    fromfile=f"live/{entity['wiki_title']}",
+                    tofile=f"merged/{entity['wiki_title']}",
                     lineterm="",
                 )
             )
             outputs[f"{safe_title}.diff"] = diff + "\n"
         else:
+            outputs[f"{safe_title}.wikitext"] = kb_wikitext
             new_pages.append(entity)
 
     if new_pages:

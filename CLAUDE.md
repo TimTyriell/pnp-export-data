@@ -44,6 +44,16 @@ to plain text. New pages are never created by the agent: `NEW_PAGES.md` lists
 them for a human to create manually, after which the next sync fills them via
 the update path.
 
+**Updates are an additive section-merge, never a replace**
+([wikimerge.py](wikimerge.py)). The live wiki pages are hand-curated
+(infoboxes, images, prose, categories); a full replace would destroy that.
+So for `action: update` the proposal keeps the live page verbatim and only
+*appends* KB sections whose heading isn't already present (plus the `Belege`
+citations), and unions categories. Nothing hand-written is ever deleted — the
+`.diff` a reviewer sees is additions-only. Redundant sections (a human
+"Persönlichkeit" and a KB one worded differently) both survive; the reviewer
+trims overlap. Do not change this to overwrite existing pages.
+
 - **[config.py](config.py)** is the single source of truth for all tunables
   (wiki URL, bot creds via env, Ollama host/model, directories, `DRY_RUN`).
   Scripts import from it directly; there are no CLI flags for these values.

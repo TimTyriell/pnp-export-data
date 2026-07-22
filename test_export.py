@@ -104,22 +104,29 @@ def test_plan_skips_duplicate_titles():
 def test_generate_proposals_writes_wikitext_diff_and_new_pages():
     plan = extract.plan_entities(_CONCEPTS, ["Die Hexe"])
     bodies = {
-        "npcs/hexe": "# Überblick\n\nDie Hexe lebt in [Hartwacht](/locations/hartwacht.md).",
-        "characters/lindo_laut": "# Überblick\n\nBarde.",
+        "npcs/hexe": "# Die Hexe\n\nAlt.\n\n## Herkunft\n\nAus dem Sumpf.",
+        "characters/lindo_laut": "# Überblick\n\nBarde in [Hartwacht](/locations/hartwacht.md).",
     }
     live = {"Die Hexe": "== Überblick ==\n\nDie Hexe lebt im Sumpf.\n"}
     outputs = generate.generate_proposals(plan, bodies, live)
 
-    assert "Die Hexe.wikitext" in outputs
-    assert "[[Kategorie:NPCs]]" in outputs["Die Hexe.wikitext"]
-    # Link target has no wiki page in this plan -> plain label.
-    assert "Hartwacht" in outputs["Die Hexe.wikitext"]
-    assert "[[Hartwacht" not in outputs["Die Hexe.wikitext"]
+    # -- update (Die Hexe) is an additive merge --
+    hexe = outputs["Die Hexe.wikitext"]
+    assert "Die Hexe lebt im Sumpf." in hexe  # live content preserved
+    assert "== Herkunft ==" in hexe  # new KB section appended
+    assert "[[Kategorie:NPCs]]" in hexe  # KB category unioned in
+    # diff is additions-only: no line removed from the live page.
+    removals = [
+        l
+        for l in outputs["Die Hexe.diff"].splitlines()
+        if l.startswith("-") and not l.startswith("---")
+    ]
+    assert removals == []
 
-    assert "Die Hexe.diff" in outputs
-    assert "-" in outputs["Die Hexe.diff"] and "Sumpf" in outputs["Die Hexe.diff"]
-
-    assert "Lindo Laut.wikitext" in outputs
+    # -- create (Lindo) uses raw KB wikitext: links + no diff --
+    lindo = outputs["Lindo Laut.wikitext"]
+    assert "[[Kategorie:Charaktere]]" in lindo
+    assert "Hartwacht" in lindo and "[[Hartwacht" not in lindo  # no wiki page -> plain
     assert "Lindo Laut.diff" not in outputs
     assert "NEW_PAGES.md" in outputs
     assert "Lindo Laut" in outputs["NEW_PAGES.md"]
