@@ -1,0 +1,18 @@
+# Secrets / instance config
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+fandom_env/
+
+# Generated / cached data (large or per-run, not source of truth)
+reports/
+wiki_cache/
+proposals/
+
+# Editor / OS cruft
+.DS_Store
+._*
