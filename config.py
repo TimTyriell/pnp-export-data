@@ -44,8 +44,30 @@ WIKI_USER_AGENT = os.environ.get(
 DRAFT_NAMESPACE = os.environ.get("WIKI_DRAFT_NAMESPACE", "User")
 
 
+# --- Knowledge-Base API (the "memory" repo, pnp-graph-service) -------------
+
+# Read-only KB API over the OKF bundle. Start it in the memory repo:
+#   cd ../pnp-graph-service/services/kb && python -m pnp_okf.api
+KB_URL = os.environ.get("PNP_KB_URL", "http://127.0.0.1:8070")
+
+# Concept types exported as wiki pages. Sessions stay KB-internal by default.
+EXPORT_TYPES = ["Character", "NPC", "Location", "Faction", "Item", "Event"]
+
+# German category name per concept type, appended as [[Kategorie:...]].
+CATEGORY_BY_TYPE = {
+    "Character": "Charaktere",
+    "NPC": "NPCs",
+    "Location": "Orte",
+    "Faction": "Fraktionen",
+    "Item": "Gegenstände",
+    "Event": "Ereignisse",
+}
+
+
 # --- LLM (local via Ollama) ----------------------------------------------
 
+# ponytail: unused since stages 2/3 went deterministic (KB bodies are already
+# synthesized German markdown). Kept for a later prose-polish pass, if ever.
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1")
 

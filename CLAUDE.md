@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An LLM-driven agent service that **reads and maintains a Fandom/MediaWiki wiki**
-from our Pen-&-Paper campaign's session reports. The goal: turn LLM-generated
-session reports (eventually sourced from a graph) into well-structured,
-cross-linked wiki pages automatically, instead of editing the wiki by hand.
+The **output repo** of the three-repo campaign toolchain (input: `pnp-crawl`,
+memory: `pnp-graph-service`, output: this). An agent service that **reads and
+maintains the campaign's Fandom/MediaWiki wiki** from the Knowledge-Base — it
+is a *client of the KB API*, never a knowledge store of its own (ADR-001 in
+`../pnp-graph-service/docs/architecture/`).
 
-The service is the **downstream consumer of pnp-crawl** — its input are the
-session reports that pnp-crawl's planned stage-4 report generator produces (see
-`REPORT_TYPES`/`CAMPAIGN_CONTEXT` in `../pnp-crawl/config.py`). It is otherwise
-independent of the other repos under `c:\dev\pnp` (separate git remote, own
-language/tooling). Don't assume changes here affect them or vice versa.
+Its input is the read-only KB API served from the memory repo
+(`config.KB_URL`, default `http://127.0.0.1:8070` — start via
+`cd ../pnp-graph-service/services/kb && python -m pnp_okf.api`). The old
+`reports/` input path is gone.
 
 The campaign and all generated content are **German** (`LANGUAGE = "de"`). Write
 example data, prompts, and generated Wikitext in German, not English.
@@ -25,11 +25,24 @@ stage reads the previous stage's output directory and is idempotent — re-runni
 after adding new reports is safe.
 
 ```
-01_inventory.py  Wiki → page index/plan in wiki_cache/   (what already exists)
-02_extract.py    reports/ → entities.json via Ollama       (NPCs/places/events…)
-03_generate.py   entities + index → proposals/ Wikitext    (the dry-run output)
+01_inventory.py  Wiki → page index in wiki_cache/          (what already exists)
+02_extract.py    KB API vs page index → entities.json      (create|update plan;
+                                                            deterministic, no LLM)
+03_generate.py   plan + KB bodies → proposals/ Wikitext     (md2wiki.py converts
+                                                            deterministically:
+                                                            .wikitext per page,
+                                                            .diff for updates,
+                                                            NEW_PAGES.md list)
 04_upload.py     reviewed proposals/ → wiki                 (gated; see below)
 ```
+
+Stages 2/3 are **deterministic** — the KB bodies are already synthesized,
+cited German markdown, so conversion cannot hallucinate. [md2wiki.py](md2wiki.py)
+maps headings/bold/lists/links to Wikitext; concept links resolve via the
+plan's concept→wiki-title map, links to concepts without a wiki page degrade
+to plain text. New pages are never created by the agent: `NEW_PAGES.md` lists
+them for a human to create manually, after which the next sync fills them via
+the update path.
 
 - **[config.py](config.py)** is the single source of truth for all tunables
   (wiki URL, bot creds via env, Ollama host/model, directories, `DRY_RUN`).
@@ -61,17 +74,19 @@ Do not weaken or bypass this gate (e.g. defaulting `DRY_RUN` to False, hardcodin
 
 ## Status
 
-Stages 1 and the wiki client are implemented; **stages 2 and 3 are scaffolded
-stubs** that raise `NotImplementedError` with a TODO describing the intended
-Ollama call. When implementing them, follow the docstring contract: stage 2
-writes `wiki_cache/entities.json` with per-entity `action: create|update`; stage
-3 writes `proposals/<Title>.wikitext` (+ `.diff` for updates).
+All four stages implemented. Stage 2 writes `wiki_cache/entities.json` with
+per-entity `action: create|update` (title/alias match against the page
+index); stage 3 writes `proposals/<Title>.wikitext` (+ `.diff` for updates,
+`NEW_PAGES.md` for creates). Offline tests: `python -m pytest`
+([test_export.py](test_export.py) — converter, planning, proposal cores; no
+network/wiki needed). The wiki itself is not yet configured
+(`WIKI_API_URL` placeholder) — stage 1/DIFFS need a real wiki.
 
 ## Conventions & setup
 
-- **Python**, local LLM via **Ollama** (`config.OLLAMA_HOST`/`OLLAMA_MODEL`);
-  no cloud LLM API. Talk to it via its HTTP API, don't add an OpenAI/Anthropic
-  dependency unless asked.
+- **Python**, no LLM in the pipeline (deterministic conversion; the Ollama
+  settings in config are kept only for a possible future prose-polish pass —
+  don't add an OpenAI/Anthropic dependency unless asked).
 - Secrets (bot password, wiki URL) come from `.env` via `python-dotenv`
   (optional, falls back to shell env), same pattern as pnp-crawl. Never hardcode
   them into `config.py`. `.env.example` documents the keys.
