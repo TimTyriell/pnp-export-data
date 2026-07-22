@@ -1,6 +1,6 @@
 """Stage 2 — Plan: reconcile KB concepts against the wiki page index.
 
-Since the Knowledge-Base (memory repo, pnp-graph-service) already holds
+Since the Knowledge-Base (memory repo, pnp-knowledge) already holds
 synthesized entity concepts, this stage needs no LLM: it lists exportable
 concepts from the KB API, matches each against the stage-1 page index
 (title or alias hit -> update, otherwise create), and writes the plan.
@@ -95,7 +95,7 @@ def main() -> None:
     except requests.RequestException as exc:
         raise SystemExit(
             f"KB API not reachable at {config.KB_URL} ({exc}).\n"
-            "Start it: cd ../pnp-graph-service/services/kb && python -m pnp_okf.api"
+            "Start it: cd ../pnp-knowledge/services/kb && python -m pnp_okf.api"
         )
     plan = plan_entities(concepts, page_titles)
 

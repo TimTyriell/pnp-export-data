@@ -5,14 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 The **output repo** of the three-repo campaign toolchain (input: `pnp-crawl`,
-memory: `pnp-graph-service`, output: this). An agent service that **reads and
+memory: `pnp-knowledge`, output: this). An agent service that **reads and
 maintains the campaign's Fandom/MediaWiki wiki** from the Knowledge-Base — it
 is a *client of the KB API*, never a knowledge store of its own (ADR-001 in
-`../pnp-graph-service/docs/architecture/`).
+`../pnp-knowledge/docs/architecture/`).
 
 Its input is the read-only KB API served from the memory repo
 (`config.KB_URL`, default `http://127.0.0.1:8070` — start via
-`cd ../pnp-graph-service/services/kb && python -m pnp_okf.api`). The old
+`cd ../pnp-knowledge/services/kb && python -m pnp_okf.api`). The old
 `reports/` input path is gone.
 
 The campaign and all generated content are **German** (`LANGUAGE = "de"`). Write

@@ -44,10 +44,10 @@ WIKI_USER_AGENT = os.environ.get(
 DRAFT_NAMESPACE = os.environ.get("WIKI_DRAFT_NAMESPACE", "User")
 
 
-# --- Knowledge-Base API (the "memory" repo, pnp-graph-service) -------------
+# --- Knowledge-Base API (the "memory" repo, pnp-knowledge) -----------------
 
 # Read-only KB API over the OKF bundle. Start it in the memory repo:
-#   cd ../pnp-graph-service/services/kb && python -m pnp_okf.api
+#   cd ../pnp-knowledge/services/kb && python -m pnp_okf.api
 KB_URL = os.environ.get("PNP_KB_URL", "http://127.0.0.1:8070")
 
 # Concept types exported as wiki pages. Sessions stay KB-internal by default.
