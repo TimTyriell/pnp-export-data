@@ -107,3 +107,17 @@ def markdown_to_wikitext(
     if category:
         text += f"\n[[Kategorie:{category}]]\n"
     return text
+
+
+# Transcription variants are pipeline bookkeeping, not encyclopaedic content:
+# a reader does not care that the group's audio was once heard as "Breschka".
+# The KB records them (they drive alias matching); the wiki should not repeat
+# them. Aliases a character is genuinely *known* by are phrased differently
+# ("auch X genannt") and deliberately survive.
+_TRANSCRIPTION_NOTE_RE = re.compile(r"\s*\([^()]*transkribiert[^()]*\)")
+
+
+def strip_transcription_variants(body_md: str) -> str:
+    """Drop "(auch X, Y transkribiert)" asides from a KB body."""
+
+    return _TRANSCRIPTION_NOTE_RE.sub("", body_md)

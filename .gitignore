@@ -12,6 +12,8 @@ fandom_env/
 reports/
 wiki_cache/
 proposals/
+logs/
+harvest/
 
 # Editor / OS cruft
 .DS_Store

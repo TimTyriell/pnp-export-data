@@ -68,6 +68,49 @@ trims overlap. Do not change this to overwrite existing pages.
   mechanism that makes cross-references resolve — keep it fresh before
   generating.
 
+## Logging & debugging (read this before touching output)
+
+Every stage writes structured events to `logs/<run_id>.jsonl` via
+[runlog.py](runlog.py) — one JSON object per line, one file per run, gitignored.
+`proposals/` is flat and keeps files from older runs, so **the run log is the
+only record of which run wrote which file** (`write` events carry `name`,
+`bytes`, `sha8`) and of *why* a page came out the way it did.
+
+- `run_id` = UTC timestamp + pid, or `PNP_RUN_ID` if set. One file per run means
+  parallel agents never contend for the same log — each just sets its own
+  `PNP_RUN_ID`.
+- The `merge` event per updated page is the main debug hook: `live_bytes`,
+  `live_headings` (level-2 sections), `live_headings_all` (everything matched
+  against), `kb_headings`, `appended`, `skipped`, `out_sha8`. A bad merge is
+  visible from that one line without opening the file.
+- `anomaly` events (`level: "warn"`) report smells, they never change a merge:
+  `live_headings_empty` (live page has no heading to match → whole article gets
+  appended again), `full_reappend`, `dup_heading`, `dup_content` (two proposal
+  files with identical bytes — stale near-duplicate titles). Detectors live in
+  [03_generate.py](03_generate.py) next to `generate_proposals`.
+- Stage 2 logs a `plan_entry` per exported entity **and** a `skip` per dropped
+  one with its reason — `entities.json` only shows the survivors.
+
+Read it with plain tools; there is no query CLI on purpose:
+
+```bash
+ls logs/                                        # runs, newest last
+grep '"level": "warn"' logs/<run_id>.jsonl      # everything suspicious
+grep '"title": "Cookie"' logs/<run_id>.jsonl    # one page's whole story
+```
+
+**Rules for agents working in this repo:**
+
+1. Set `PNP_RUN_ID=agent-<kurzslug>` at the start of your session.
+2. Look at `logs/` before you touch anything — don't guess which proposal file
+   is current, check the `write` event.
+3. After every article you write or edit by hand, log it into the same stream:
+   ```bash
+   python runlog.py --stage agent --event edit --target "Slix" \
+       --note "KB-Dublette unter 'Persönlichkeit' entfernt"
+   ```
+4. Never share a `PNP_RUN_ID` with another agent running at the same time.
+
 ## The review gate (important)
 
 This service writes to a live wiki, so writes are gated by design:
@@ -100,8 +143,8 @@ network/wiki needed). The wiki itself is not yet configured
 - Secrets (bot password, wiki URL) come from `.env` via `python-dotenv`
   (optional, falls back to shell env), same pattern as pnp-crawl. Never hardcode
   them into `config.py`. `.env.example` documents the keys.
-- `reports/`, `wiki_cache/`, and `proposals/` are gitignored generated/cached
-  data — don't propose committing their contents.
+- `reports/`, `wiki_cache/`, `proposals/`, and `logs/` are gitignored
+  generated/cached data — don't propose committing their contents.
 - No system Python is on PATH in this environment (the sibling pnp-crawl
   installs into a venv). Set up a venv (`fandom_env/`, gitignored) per the
   README before running anything.

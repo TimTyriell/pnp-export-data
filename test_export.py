@@ -72,6 +72,7 @@ _CONCEPTS = [
         "type": "NPC",
         "title": "Die Hexe",
         "aliases": ["Sumpfhexe"],
+        "sessions": 2,  # above config.MIN_SESSIONS, so not dropped by the gate
     },
     {
         "concept": "characters/lindo_laut",
@@ -79,6 +80,7 @@ _CONCEPTS = [
         "type": "Character",
         "title": "Lindo Laut",
         "aliases": [],
+        "sessions": 2,
     },
 ]
 
