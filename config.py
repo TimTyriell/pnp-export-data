@@ -77,6 +77,11 @@ MIN_SESSIONS = 2
 # regenerated, citation numbering was corrected), so byte-identity finds
 # nothing. 0.8 catches those while leaving genuinely rewritten sections outside,
 # where they stay untouched. Lower = reclaims more aggressively.
+#
+# **Migration-only.** It is consulted for a page whose KI region is `absent`.
+# Once a page has been synced with markers its state is `clean` or `edited`
+# forever after, and this value is never read for it again. Override per run
+# for a stubborn page: PNP_RECLAIM_SIMILARITY=0.45 python 03_generate.py
 RECLAIM_SIMILARITY = float(os.environ.get("PNP_RECLAIM_SIMILARITY", "0.8"))
 
 # German category name per concept type, appended as [[Kategorie:...]].

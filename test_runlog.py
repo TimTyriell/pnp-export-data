@@ -93,11 +93,16 @@ def test_level2_live_page_is_clean():
 
 def test_merge_decisions_record_what_was_appended():
     _, decisions = merge_wikitext_verbose(_LIVE_LEVEL2, _KB, "Alte Götter")
+    # Still every level-2 section the live page had, reclaim or not.
     assert decisions["live_headings"] == ["Überblick", "Anhänger"]
-    # "Übersicht" is the KB lead, which the live page has no heading for;
-    # the two KB sections the live page already covers are skipped.
-    assert decisions["appended"] == ["Übersicht", "Belege"]
-    assert set(decisions["skipped"]) == {"Überblick", "Anhänger"}
+    # "Übersicht" is the KB lead, which the live page has no heading for.
+    # "Überblick" is reclaimed: its live text is close enough to what the KB
+    # renders today to be our own earlier output, so it moves into the KI
+    # region and gets refreshed from the KB instead of being skipped forever.
+    # "Anhänger" is not KB-derived and stays outside as human content.
+    assert decisions["reclaimed"] == ["Überblick"]
+    assert decisions["appended"] == ["Übersicht", "Überblick", "Belege"]
+    assert set(decisions["skipped"]) == {"Anhänger"}
 
 
 def test_dup_content_flags_identical_files_under_different_titles():

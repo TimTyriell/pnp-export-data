@@ -256,9 +256,16 @@ def merge_wikitext_verbose(
     # at all. Comparing only level-2 headings made those pages look
     # section-less, so every KB section counted as new and the whole article
     # was appended a second time on the next sync.
+    # Built from what actually stays as human content, not from the original
+    # page: a reclaimed section belongs to the KI region now, so its heading
+    # must NOT block the KB from putting it there. Scanning live_body instead
+    # left the region empty and blanked pages that were reclaimed whole.
+    retained = "\n".join(
+        [live_lead] + [f"== {h} ==\n{b}" for h, b in live_sections]
+    )
     live_headings = {
         _norm(m.group(2))
-        for m in (_HEADING_RE.match(line) for line in live_body.splitlines())
+        for m in (_HEADING_RE.match(line) for line in retained.splitlines())
         if m
     }
 
