@@ -51,12 +51,24 @@ def detect_anomalies(title: str, decisions: dict, wikitext: str) -> list[dict]:
     kb_headings = decisions["kb_headings"]
     appended = decisions["appended"]
 
+    # Both checks below describe the pre-KI-region failure mode: KB text landing
+    # a second time beside live content the merge could not match. Once a page
+    # has a KI region (or sections were reclaimed into a new one), rewriting the
+    # whole region from the KB *is* the design, and having no headings outside
+    # it is normal — so neither is a smell there.
+    rewrites_region = decisions.get("ki_state") != "absent" or decisions.get("reclaimed")
+
     # A substantial live page with no heading at all: nothing can match, so
     # every KB section counts as new and the article is appended a second time.
-    if decisions["live_bytes"] > 500 and not live_headings:
+    if not rewrites_region and decisions["live_bytes"] > 500 and not live_headings:
         found.append({"kind": "live_headings_empty", "live_bytes": decisions["live_bytes"]})
 
-    if decisions["live_bytes"] > 0 and kb_headings and set(appended) >= set(kb_headings):
+    if (
+        not rewrites_region
+        and decisions["live_bytes"] > 0
+        and kb_headings
+        and set(appended) >= set(kb_headings)
+    ):
         found.append({"kind": "full_reappend", "appended": appended})
 
     seen: set[str] = set()

@@ -136,6 +136,11 @@ HARVEST_DIR = ROOT / "harvest"
 # the merge decisions behind it. Gitignored.
 LOGS_DIR = ROOT / "logs"
 
+# Machine-readable status snapshot for the pnp-dashboard service (see
+# ../pnp-knowledge/docs/architecture/status-schema.md). Written by
+# 05_report.py alongside the human-readable reports. Gitignored.
+STATUS_DIR = ROOT / "status"
+
 
 # --- Review gate ----------------------------------------------------------
 

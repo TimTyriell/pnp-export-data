@@ -5,7 +5,9 @@ ones need a human?" in a form the team can read without access to this repo:
 
   reports/ki_pages.md    table + a "needs attention" list, paste-ready
   reports/ki_pages.csv   same rows + an empty "Zuständig" column for assigning
-  reports/ki_pages.json  machine copy, includes each page's KI text
+  reports/ki_pages.html  self-contained page: same overview, texts readable
+                         inline, searchable — the one to hand to the group
+  reports/ki_pages.json  machine copy, includes each page's text
 
 Which pages count as KI-edited comes from the wiki itself (the bot account's
 contributions, filtered by the pipeline's edit summary), not from local run
@@ -23,8 +25,11 @@ import csv
 import glob
 import json
 import urllib.parse
+from datetime import datetime, timezone
+from pathlib import Path
 
 import config
+import report_html
 import runlog
 from wiki_client import WikiClient
 from wikimerge import ki_region_state
@@ -62,17 +67,36 @@ def ki_edits(client: WikiClient) -> dict[str, str]:
     return latest
 
 
-def latest_anomalies() -> dict[str, list[str]]:
-    """``title -> [kind]`` from the newest run log that has any."""
+def run_logs_newest_first() -> list[str]:
+    """Run logs by mtime, newest first — a custom PNP_RUN_ID ("agent-foo")
+    makes the filename useless for ordering."""
 
-    for path in sorted(glob.glob(str(config.LOGS_DIR / "*.jsonl")), reverse=True):
+    return sorted(
+        glob.glob(str(config.LOGS_DIR / "*.jsonl")),
+        key=lambda p: Path(p).stat().st_mtime,
+        reverse=True,
+    )
+
+
+def latest_anomalies() -> dict[str, list[str]]:
+    """``title -> [kind]`` from the most recent generate run.
+
+    Deliberately the *newest* generate log, even when it is clean: falling
+    back to an older log that still has anomalies would report defects the
+    last run already resolved.
+    """
+
+    for path in run_logs_newest_first():
         found: dict[str, list[str]] = {}
+        is_generate_run = False
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 rec = json.loads(line)
+                if rec.get("stage") == "03_generate":
+                    is_generate_run = True
                 if rec.get("event") == "anomaly" and rec.get("title"):
                     found.setdefault(rec["title"], []).append(rec["kind"])
-        if found:
+        if is_generate_run:
             return found
     return {}
 
@@ -110,6 +134,9 @@ def collect(client: WikiClient) -> list[dict]:
                 "ki_bytes": len(region or ""),
                 "anomalies": anomalies.get(title, []),
                 "ki_text": region or "",
+                # Pages synced before the region existed have no region text,
+                # and the team still needs to be able to read those.
+                "page_text": text,
             }
         )
     rows.sort(key=lambda r: r["last_edit"], reverse=True)
@@ -121,7 +148,6 @@ def _date(ts: str) -> str:
 
 
 def render_markdown(rows: list[dict]) -> str:
-    attention = [r for r in rows if r["ki_state"] != "clean" or r["anomalies"]]
     out = [
         "# KI-gepflegte Wiki-Seiten",
         "",
@@ -145,23 +171,40 @@ def render_markdown(rows: list[dict]) -> str:
             f"{r['last_editor'] or '—'} | {_STATE_LABEL[r['ki_state']]} | {notes} |"
         )
 
+    # Only what a person should act on. "kein KI-Abschnitt" is a pipeline
+    # state, not a task — those pages get their region on the next sync, so
+    # they are counted below instead of padding the list to every page.
+    harvest = [r for r in rows if r["ki_state"] == "edited"]
+    flagged = [r for r in rows if r["anomalies"]]
+    absent = [r for r in rows if r["ki_state"] == "absent"]
+
     out += ["", "## Zu erledigen", ""]
-    if attention:
-        for r in attention:
-            reasons = []
-            if r["ki_state"] == "edited":
-                reasons.append(
-                    "Handschriftliche Ergänzung im KI-Abschnitt → in die "
-                    "Wissensbasis übernehmen"
-                )
-            elif r["ki_state"] == "absent":
-                reasons.append("kein KI-Abschnitt → beim nächsten Abgleich prüfen")
-            if r["anomalies"]:
-                reasons.append("Auffälligkeit: " + ", ".join(r["anomalies"]))
-            out.append(f"- **[{r['title']}]({r['url']})** — {'; '.join(reasons)}")
-    else:
-        out.append("Nichts offen — alle KI-Abschnitte unverändert.")
-    out.append("")
+    if harvest:
+        out += [
+            "**Team-Text in die Wissensbasis übernehmen** — jemand hat im "
+            "KI-Abschnitt geschrieben. Der Text bleibt stehen, bis er in der "
+            "Wissensbasis ist:",
+            "",
+        ]
+        out += [f"- [{r['title']}]({r['url']}) — {r['last_editor']}, {_date(r['last_edit'])}" for r in harvest]
+        out.append("")
+    if flagged:
+        out += [
+            "**Gegenlesen** — die letzte Generierung war bei diesen Seiten "
+            "auffällig (meist doppelter Text):",
+            "",
+        ]
+        out += [f"- [{r['title']}]({r['url']}) — {', '.join(r['anomalies'])}" for r in flagged]
+        out.append("")
+    if not harvest and not flagged:
+        out += ["Nichts offen.", ""]
+    if absent:
+        out += [
+            f"*{len(absent)} Seite(n) haben noch keinen markierten KI-Abschnitt "
+            "(vor dessen Einführung hochgeladen). Der nächste Abgleich holt das "
+            "nach — kein Handlungsbedarf.*",
+            "",
+        ]
     return "\n".join(out)
 
 
@@ -197,17 +240,114 @@ def write_reports(rows: list[dict]) -> list[str]:
         json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     written.append(str(json_path))
+
+    html_path = config.REPORTS_DIR / "ki_pages.html"
+    html_path.write_text(report_html.render(rows), encoding="utf-8")
+    written.append(str(html_path))
     return written
+
+
+def _last_run_counts() -> dict | None:
+    """Fold the newest run log's stage_end events into a summary, or None."""
+
+    log_files = run_logs_newest_first()
+    if not log_files:
+        return None
+    latest = log_files[0]
+    records = []
+    with open(latest, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    if not records:
+        return None
+    timestamps = sorted(r["ts"] for r in records if "ts" in r)
+    ends = [r for r in records if r.get("event") == "stage_end"]
+    ok = not any(r.get("level") == "error" for r in records)
+    counts = {"uploaded": 0, "skipped_new": 0, "failed": 0, "dry_run": None}
+    for r in ends:
+        for key in ("uploaded", "skipped_new", "failed"):
+            if key in r:
+                counts[key] = r[key]
+        if "dry_run" in r:
+            counts["dry_run"] = r["dry_run"]
+    return {
+        "run_id": Path(latest).stem,
+        "started_at": timestamps[0] if timestamps else None,
+        "ended_at": timestamps[-1] if timestamps else None,
+        "ok": ok,
+        "error": None,
+        "counts": counts,
+    }
+
+
+def _planned_stubs() -> list[str]:
+    """Planned pages (entities.json, action: create) not yet live on the wiki."""
+
+    entities_path = config.WIKI_CACHE_DIR / "entities.json"
+    index_path = config.WIKI_CACHE_DIR / "page_index.json"
+    if not entities_path.exists() or not index_path.exists():
+        return []
+    plan = json.loads(entities_path.read_text(encoding="utf-8"))
+    live = set(json.loads(index_path.read_text(encoding="utf-8")))
+    return sorted({e["wiki_title"] for e in plan if e.get("action") == "create" and e["wiki_title"] not in live})
+
+
+def build_actions(rows: list[dict]) -> list[dict]:
+    actions = []
+    for path in sorted(config.HARVEST_DIR.glob("*.md")) if config.HARVEST_DIR.is_dir() else []:
+        actions.append({"kind": "harvest", "label": "Team-Text muss in KB übernommen werden", "ref": path.name})
+    for title in _planned_stubs():
+        actions.append({"kind": "stub", "label": "Seite noch nicht angelegt", "ref": title})
+    for r in rows:
+        if r["ki_state"] == "edited":
+            actions.append({"kind": "edited", "label": "KI-Abschnitt vom Team überarbeitet", "ref": r["title"]})
+        for anomaly in r["anomalies"]:
+            actions.append({"kind": "anomaly", "label": anomaly, "ref": r["title"]})
+    return actions
+
+
+def write_status(rows: list[dict]) -> dict:
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    status = {
+        "schema": 1,
+        "service": "pnp-export-data",
+        "generated_at": now,
+        "last_run": _last_run_counts(),
+        # Without the page bodies — the dashboard lists pages, it does not
+        # render them, and they are ~300 KB.
+        "items": [{k: v for k, v in r.items() if k != "page_text"} for r in rows],
+        "actions": build_actions(rows),
+    }
+    config.STATUS_DIR.mkdir(parents=True, exist_ok=True)
+    (config.STATUS_DIR / "status.json").write_text(
+        json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    history_line = {
+        "ts": now,
+        "pages_ki": len(rows),
+        "pages_clean": sum(1 for r in rows if r["ki_state"] == "clean"),
+        "pages_edited": sum(1 for r in rows if r["ki_state"] == "edited"),
+        "uploaded": (status["last_run"] or {}).get("counts", {}).get("uploaded", 0),
+        "failed": (status["last_run"] or {}).get("counts", {}).get("failed", 0),
+    }
+    with open(config.STATUS_DIR / "history.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(history_line, ensure_ascii=False) + "\n")
+
+    return status
 
 
 def main() -> None:
     runlog.log(_STAGE, "stage_start")
     rows = collect(WikiClient())
     written = write_reports(rows)
+    status = write_status(rows)
     edited = sum(1 for r in rows if r["ki_state"] == "edited")
     runlog.log(
         _STAGE, "stage_end", pages=len(rows), edited_by_team=edited,
-        files=written,
+        files=written, actions=len(status["actions"]),
         echo=(
             f"{len(rows)} KI-Seiten erfasst ({edited} vom Team überarbeitet). "
             + " · ".join(written)
