@@ -53,11 +53,10 @@ KI_NOTICE = (
 
 # Shown on the page itself, once, as the divider between the hand-written part
 # and the generated one.
-KI_LABEL = "Einträge aus Lindo Lauts Ki Notizbuch:"
+KI_LABEL = "Lindo Lauts Magisches Notizbuch:"
 KI_LABEL_HINT = (
-    "Automatisch aus der Wissensbasis erzeugt. Änderungen hier sind erlaubt — "
-    "sie werden beim nächsten Abgleich in die Wissensbasis übernommen, bevor "
-    "der Abschnitt neu geschrieben wird."
+    "Teils KI generierte Inhalte, Inhalte werden gespeichert, Struktur und "
+    "Formulierungen können sich aber ändern."
 )
 
 
@@ -269,6 +268,31 @@ def merge_wikitext_verbose(
                 reclaimed.append("(ganze Seite)")
                 live_lead = ""
 
+    # An empty hand-written heading whose content the KB supplies is a shell:
+    # the section it announces is the one sitting in the region right below it,
+    # so it left the label stranded under a heading with nothing under it.
+    # Dropping it removes no text — only the duplicate heading — and lets the
+    # KB fill that section inside the region where it belongs. An empty heading
+    # the KB does *not* know stays: that one is a human's own placeholder.
+    kb_heading_norms = {_norm(h) for h, _ in kb_sections}
+    dropped_empty = [
+        h
+        for h, b in live_sections
+        if not b.strip() and _norm(h) in kb_heading_norms
+    ]
+    if dropped_empty:
+        live_sections = [
+            (h, b) for h, b in live_sections if h not in dropped_empty
+        ]
+
+    # Same shell, one case further: an empty heading at the very end of the
+    # hand-written part sits directly on top of the label whatever it is called
+    # (``Wichtige Merkmale`` survives _flatten_kb only on some concepts, so the
+    # rule above misses it there). Trailing and empty means the label would
+    # open under a heading announcing nothing.
+    while live_sections and not live_sections[-1][1].strip():
+        dropped_empty.append(live_sections.pop()[0])
+
     # Match against EVERY heading on the live page, at any level — not just the
     # level-2 ones _split_sections carves sections from. md2wiki renders the
     # KB's "## Foo" as "=== Foo ===", so a page seeded from a `create` proposal
@@ -327,6 +351,7 @@ def merge_wikitext_verbose(
         "ki_state": ki_state,
         "harvest": None,
         "reclaimed": reclaimed,
+        "dropped_empty": dropped_empty,
         # Structural (level-2 sections) vs. everything matched against; they
         # differ exactly on the pages that used to double up.
         "live_headings": live_section_headings,

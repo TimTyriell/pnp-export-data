@@ -208,6 +208,42 @@ def test_human_edit_inside_the_region_is_never_overwritten():
     assert "Begraben in Ehrenfels." in decisions["harvest"]
 
 
+def test_empty_hand_heading_the_kb_fills_is_dropped():
+    """It left the label stranded under a heading with nothing beneath it."""
+
+    live = _HAND.replace(
+        "== Verschiedenes ==", "== Wichtige Merkmale ==\n\n== Verschiedenes =="
+    )
+    out, decisions = merge_wikitext_verbose(live, _KB_V1, "Nox")
+    assert decisions["dropped_empty"] == ["Wichtige Merkmale"]
+    # The label now follows real text, not an empty shell.
+    before_label = out[: out.index(KI_LABEL)]
+    assert "Mag Kaffee." in before_label
+    assert "Wichtige Merkmale" not in before_label
+    # A heading the human wrote and filled is untouched.
+    assert "== Verschiedenes ==" in before_label
+
+
+def test_empty_hand_heading_the_kb_does_not_know_stays():
+    """...as long as it is not the one the label would open under."""
+
+    live = _HAND.replace(
+        "== Verschiedenes ==", "== Offene Punkte ==\n\n== Verschiedenes =="
+    )
+    out, decisions = merge_wikitext_verbose(live, _KB_V1, "Nox")
+    assert decisions["dropped_empty"] == []
+    assert "== Offene Punkte ==" in out
+
+
+def test_trailing_empty_heading_above_the_label_is_dropped():
+    live = _HAND.rstrip() + "\n\n== Offene Punkte ==\n"
+    out, decisions = merge_wikitext_verbose(live, _KB_V1, "Nox")
+    assert decisions["dropped_empty"] == ["Offene Punkte"]
+    assert "== Offene Punkte ==" not in out
+    # The last thing before the region is the human's actual prose.
+    assert out[: out.index("<!-- KI-Abschnitt")].rstrip().endswith("Mag Kaffee.")
+
+
 def test_label_separates_the_two_halves_and_appears_once():
     synced = merge_wikitext(_HAND, _KB_V1, "Nox")
     assert synced.count(KI_LABEL) == 1

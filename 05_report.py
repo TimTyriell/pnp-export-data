@@ -54,6 +54,17 @@ def page_url(title: str) -> str:
     return f"{base}/wiki/{urllib.parse.quote(title.replace(' ', '_'))}"
 
 
+def create_page_url(title: str) -> str:
+    """Direct link to the wiki's editor for a page that doesn't exist yet.
+
+    MediaWiki opens the "create new page" editor for any non-existing title
+    when ?action=edit is appended — no API call needed, just a link a human
+    clicks to type the page by hand (pages are never created by the agent,
+    see CLAUDE.md).
+    """
+    return f"{page_url(title)}?action=edit"
+
+
 def ki_edits(client: WikiClient) -> dict[str, str]:
     """``title -> timestamp`` of the most recent KI edit, newest first."""
 
@@ -337,7 +348,12 @@ def build_actions(rows: list[dict]) -> list[dict]:
     for path in sorted(config.HARVEST_DIR.glob("*.md")) if config.HARVEST_DIR.is_dir() else []:
         actions.append({"kind": "harvest", "label": "Team-Text muss in KB übernommen werden", "ref": path.name})
     for title in _planned_stubs():
-        actions.append({"kind": "stub", "label": "Seite noch nicht angelegt", "ref": title})
+        actions.append({
+            "kind": "stub",
+            "label": "Seite noch nicht angelegt",
+            "ref": title,
+            "url": create_page_url(title),
+        })
     for r in rows:
         if r["ki_state"] == "edited":
             actions.append({"kind": "edited", "label": "KI-Abschnitt vom Team überarbeitet", "ref": r["title"]})
