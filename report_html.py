@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from wikimerge import KI_LABEL
+
 _TEMPLATE = """<title>KI-gepflegte Wiki-Seiten — Der Splitter des Ewigen</title>
 <style>
   /* Light is the base palette; the two blocks below only re-declare tokens, so
@@ -244,6 +246,8 @@ _TEMPLATE = """<title>KI-gepflegte Wiki-Seiten — Der Splitter des Ewigen</titl
   }
   .prose p { margin: 0 0 12px; }
   .prose ul { margin: 0 0 12px; padding-left: 22px; }
+  .prose hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0 16px; }
+  .prose small { font-family: var(--sans); font-size: 13px; color: var(--muted); }
   .empty { color: var(--muted); font-size: 14px; }
 
   footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
@@ -257,10 +261,12 @@ _TEMPLATE = """<title>KI-gepflegte Wiki-Seiten — Der Splitter des Ewigen</titl
     <div class="eyebrow">Splitter des Ewigen · Wiki-Pflege</div>
     <h1>KI-gepflegte Seiten</h1>
     <p class="lede">
-      Jede Seite hier wird aus der Wissensbasis der Kampagne geschrieben. Der
-      <strong>KI-Abschnitt</strong> einer Seite wird bei jedem Abgleich neu
-      erzeugt — was ihr von Hand hineinschreibt, bleibt stehen, bis es in der
-      Wissensbasis gelandet ist. Aufklappen zeigt den Text, ohne ins Wiki zu wechseln.
+      Jede Seite hat zwei Teile, getrennt durch die Zeile
+      <strong>„__KI_LABEL__“</strong>: oben die Handarbeit des Teams, unten der
+      Teil aus der Wissensbasis, der bei jedem Abgleich neu erzeugt wird. Was
+      ihr unter der Trennlinie schreibt, bleibt stehen und blockiert die Seite,
+      bis es in der Wissensbasis gelandet ist. Aufklappen zeigt den Text, ohne
+      ins Wiki zu wechseln.
     </p>
     <div class="counts">
       <div class="count"><b>__N_TOTAL__</b><span>Seiten insgesamt</span></div>
@@ -352,6 +358,8 @@ def _inline(text: str) -> str:
     out = re.sub(r"\[\[([^\]]*)\]\]", r"\1", out)
     out = re.sub(r"'''(.+?)'''", r"<strong>\1</strong>", out)
     out = re.sub(r"''(.+?)''", r"<em>\1</em>", out)
+    # The KI label carries its hint in <small>; keep that one tag working.
+    out = re.sub(r"&lt;small&gt;(.*?)&lt;/small&gt;", r"<small>\1</small>", out)
     return out
 
 
@@ -379,6 +387,9 @@ def wikitext_to_html(text: str) -> str:
         if heading:
             flush()
             html.append(f"<h4>{_inline(heading.group(2))}</h4>")
+        elif stripped.startswith("----"):
+            flush()
+            html.append("<hr>")
         elif stripped.startswith("*"):
             if paragraph:
                 flush()
@@ -442,8 +453,9 @@ def _tasks(rows: list[dict]) -> str:
         )
         cards.append(
             '<div class="task-card is-harvest"><h3>Team-Text in die Wissensbasis</h3>'
-            "<p>Jemand hat im KI-Abschnitt geschrieben. Der Abschnitt wird nicht "
-            "mehr aktualisiert, bis der Text aufgenommen ist.</p>"
+            "<p>Jemand hat unter der Trennlinie geschrieben. Der Text bleibt "
+            "stehen und die Seite wird nicht mehr aktualisiert, bis er "
+            "aufgenommen ist.</p>"
             f"<ul>{items}</ul></div>"
         )
     if flagged:
@@ -476,6 +488,7 @@ def render(rows: list[dict]) -> str:
         "__TASKS__": _tasks(rows),
         "__ROWS__": "\n".join(_row(r) for r in rows),
         "__GENERATED__": generated,
+        "__KI_LABEL__": _esc(KI_LABEL.rstrip(":")),
     }
     html = _TEMPLATE
     for token, value in replacements.items():

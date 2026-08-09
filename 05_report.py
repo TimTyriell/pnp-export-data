@@ -24,6 +24,7 @@ from __future__ import annotations
 import csv
 import glob
 import json
+import re
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,7 +33,7 @@ import config
 import report_html
 import runlog
 from wiki_client import WikiClient
-from wikimerge import ki_region_state
+from wikimerge import KI_LABEL, ki_region_state
 
 _STAGE = "05_report"
 
@@ -101,6 +102,34 @@ def latest_anomalies() -> dict[str, list[str]]:
     return {}
 
 
+_HARVEST_TITLE_RE = re.compile(r'Aus dem KI-Abschnitt von "(.+?)" im Wiki')
+
+
+def harvest_pending() -> list[dict]:
+    """Rescued hand-written text still waiting to reach the KB.
+
+    The live ``edited`` state only lasts until the next sync rewrites the
+    region, but the obligation outlives it — these files are the task.
+    """
+
+    if not config.HARVEST_DIR.is_dir():
+        return []
+    out = []
+    for path in sorted(config.HARVEST_DIR.glob("*.md")):
+        head = path.read_text(encoding="utf-8")[:300]
+        match = _HARVEST_TITLE_RE.search(head)
+        out.append(
+            {
+                "title": match.group(1) if match else path.stem,
+                "file": path.name,
+                "saved": datetime.fromtimestamp(
+                    path.stat().st_mtime, timezone.utc
+                ).strftime("%Y-%m-%d"),
+            }
+        )
+    return out
+
+
 def entity_types() -> dict[str, str]:
     path = config.WIKI_CACHE_DIR / "entities.json"
     if not path.exists():
@@ -154,11 +183,13 @@ def render_markdown(rows: list[dict]) -> str:
         f"{len(rows)} Seiten, zuletzt von der KI bearbeitet. Erzeugt aus den "
         "Bot-Beiträgen des Wikis (`05_report.py`) — Stand siehe Datum je Zeile.",
         "",
-        "Der **KI-Abschnitt** einer Seite wird bei jedem Abgleich aus der "
-        "Wissensbasis neu geschrieben. Steht dort *vom Team überarbeitet*, hat "
-        "jemand von Hand hineingeschrieben: dieser Text ist Wissen, das die "
-        "Wissensbasis noch nicht hat, und wird beim nächsten Abgleich zuerst "
-        "übernommen und nicht überschrieben.",
+        "Jede Seite hat zwei Teile, getrennt durch die Zeile "
+        f"*„{KI_LABEL}“*. Oben steht die Handarbeit des Teams, unten der Teil "
+        "aus der Wissensbasis, der bei jedem Abgleich neu geschrieben wird. "
+        "Steht bei einer Seite *vom Team überarbeitet*, hat jemand unter der "
+        "Trennlinie geschrieben: dieser Text ist Wissen, das die Wissensbasis "
+        "noch nicht hat. Die Seite bleibt dann unangetastet, bis er dort "
+        "angekommen ist — überschrieben wird er nie.",
         "",
         "| Seite | Typ | Letzte KI-Bearbeitung | Letzte Bearbeitung | Von | KI-Abschnitt | Hinweise |",
         "|---|---|---|---|---|---|---|",
@@ -177,16 +208,23 @@ def render_markdown(rows: list[dict]) -> str:
     harvest = [r for r in rows if r["ki_state"] == "edited"]
     flagged = [r for r in rows if r["anomalies"]]
     absent = [r for r in rows if r["ki_state"] == "absent"]
+    saved = {h["title"]: h for h in harvest_pending()}
 
     out += ["", "## Zu erledigen", ""]
     if harvest:
         out += [
-            "**Team-Text in die Wissensbasis übernehmen** — jemand hat im "
-            "KI-Abschnitt geschrieben. Der Text bleibt stehen, bis er in der "
-            "Wissensbasis ist:",
+            "**Team-Text in die Wissensbasis übernehmen** — jemand hat unter "
+            "der Trennlinie geschrieben. Die Seite wird bis dahin nicht mehr "
+            "angefasst, der Text also auch nicht aktualisiert:",
             "",
         ]
-        out += [f"- [{r['title']}]({r['url']}) — {r['last_editor']}, {_date(r['last_edit'])}" for r in harvest]
+        for r in harvest:
+            file = saved.get(r["title"])
+            where = f" · gesichert in `harvest/{file['file']}`" if file else ""
+            out.append(
+                f"- [{r['title']}]({r['url']}) — {r['last_editor']}, "
+                f"{_date(r['last_edit'])}{where}"
+            )
         out.append("")
     if flagged:
         out += [

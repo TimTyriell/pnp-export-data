@@ -32,11 +32,14 @@ import config
 _HEADING_RE = re.compile(r"^(={2,6})\s*(.*?)\s*\1\s*$")
 _CATEGORY_RE = re.compile(r"^\[\[\s*Kategorie\s*:.*?\]\]\s*$", re.IGNORECASE)
 
-# The KI-maintained region. Humans may edit inside it — the checksum in the
-# opening marker is what tells a later sync whether they did: it records the
+# The KI-maintained region. Every page is two parts: what the group wrote by
+# hand above, and this region below. Humans may edit inside it — the checksum in
+# the opening marker is what tells a later sync whether they did: it records the
 # text this pipeline last wrote. Content still matching it is ours to replace;
 # content that drifted is a human contribution and must reach the KB before
-# anything overwrites it (knowledge/sources/, per pnp_okf.context).
+# anything overwrites it (knowledge/sources/, per pnp_okf.context). The markers
+# are HTML comments and invisible on the wiki, so the visible label below is
+# what actually shows a reader which half of the page they are in.
 KI_START_RE = re.compile(
     r"^<!--\s*KI-Abschnitt\b[^>]*?\bsha=([0-9a-f]{8})\b[^>]*-->\s*$", re.MULTILINE
 )
@@ -48,15 +51,32 @@ KI_NOTICE = (
     "bevor der Abschnitt neu geschrieben wird."
 )
 
+# Shown on the page itself, once, as the divider between the hand-written part
+# and the generated one.
+KI_LABEL = "Einträge aus Lindo Lauts Ki Notizbuch:"
+KI_LABEL_HINT = (
+    "Automatisch aus der Wissensbasis erzeugt. Änderungen hier sind erlaubt — "
+    "sie werden beim nächsten Abgleich in die Wissensbasis übernommen, bevor "
+    "der Abschnitt neu geschrieben wird."
+)
+
 
 def sha8(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
 
 
 def render_ki_region(content: str) -> str:
-    """Wrap ``content`` in the KI markers, stamping its checksum."""
+    """Wrap ``content`` in the KI markers behind the visible label.
 
-    body = content.strip()
+    The checksum covers label and content together — it is simply what sits
+    between the markers, so a later sync compares like for like.
+    """
+
+    body = (
+        "----\n"
+        f"'''{KI_LABEL}''' <small>{KI_LABEL_HINT}</small>\n\n"
+        f"{content.strip()}"
+    )
     return (
         f"<!-- KI-Abschnitt: {KI_NOTICE} sha={sha8(body)} -->\n"
         f"{body}\n"

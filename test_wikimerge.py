@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from wikimerge import (
     _HEADING_RE,
+    KI_LABEL,
     ki_region_state,
     merge_wikitext,
     merge_wikitext_verbose,
@@ -205,3 +206,13 @@ def test_human_edit_inside_the_region_is_never_overwritten():
     assert decisions["ki_state"] == "edited"
     # ...and the human's text is handed to the caller to harvest into the KB.
     assert "Begraben in Ehrenfels." in decisions["harvest"]
+
+
+def test_label_separates_the_two_halves_and_appears_once():
+    synced = merge_wikitext(_HAND, _KB_V1, "Nox")
+    assert synced.count(KI_LABEL) == 1
+    # Hand-written text sits above the label, KB text below it.
+    assert synced.index("Mag Kaffee.") < synced.index(KI_LABEL)
+    assert synced.index(KI_LABEL) < synced.index("Nox lebt.")
+    # Re-syncing does not stack a second label.
+    assert merge_wikitext(synced, _KB_V2, "Nox").count(KI_LABEL) == 1
