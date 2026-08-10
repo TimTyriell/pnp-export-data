@@ -42,12 +42,26 @@ def _update_titles() -> set[str] | None:
     if not plan_path.exists():
         return None
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    return {e["wiki_title"] for e in plan if e.get("action") == "update"}
+    titles = {e["wiki_title"] for e in plan if e.get("action") == "update"}
+    # Not a concept, so never in the plan — but it is an existing page that
+    # stage 3 merged, and it must go up the same way (see render_story_overview).
+    if config.STORY_OVERVIEW_PAGE:
+        titles.add(config.STORY_OVERVIEW_PAGE)
+    return titles
 
 
-def main(apply: bool) -> None:
+def main(apply: bool, create: bool = False) -> None:
+    """Upload reviewed proposals.
+
+    *create* also writes proposals for pages that do not exist yet. Off by
+    default and deliberately a separate flag from ``--apply``: creating a page
+    is not reviewable as a diff (there is nothing to diff against), so it is
+    a decision a human makes per batch. MediaWiki's ``action=edit`` creates a
+    missing page with the same call, so there is no second code path.
+    """
+
     runlog.log(
-        _STAGE, "stage_start", apply=apply, dry_run=config.DRY_RUN
+        _STAGE, "stage_start", apply=apply, create=create, dry_run=config.DRY_RUN
     )
     if not config.PROPOSALS_DIR.exists():
         runlog.log(
@@ -79,13 +93,22 @@ def main(apply: bool) -> None:
     if do_apply:
         client.login()
 
-    uploaded = skipped_new = 0
+    uploaded = skipped_new = unchanged = 0
     failures: list[tuple[str, str]] = []
     for path in proposals:
         title = path.stem
-        if title not in updates:
+        if title not in updates and not create:
             skipped_new += 1  # a proposed *new* page — humans create these
             runlog.log(_STAGE, "skip", title=title, reason="create")
+            continue
+        # An empty .diff means the merge produced the live page verbatim — the
+        # edit would come back as "nochange" after a full round trip plus
+        # EDIT_DELAY_S. Skip it. A *missing* .diff is not proof of anything
+        # (older run, hand-dropped file), so that still uploads.
+        diff_path = path.with_suffix(".diff")
+        if diff_path.exists() and not diff_path.read_text(encoding="utf-8").strip():
+            unchanged += 1
+            runlog.log(_STAGE, "skip", title=title, reason="unchanged")
             continue
         text = path.read_text(encoding="utf-8")
         # sha8 + mtime tie this upload to the stage-3 `write` event that
@@ -128,11 +151,16 @@ def main(apply: bool) -> None:
 
     runlog.log(
         _STAGE, "stage_end", uploaded=uploaded, skipped_new=skipped_new,
-        failed=len(failures), dry_run=not do_apply,
+        unchanged=unchanged, failed=len(failures), dry_run=not do_apply,
         echo=(
             f"\n{uploaded} update(s) {'uploaded' if do_apply else 'planned'}; "
-            f"{skipped_new} new-page proposal(s) skipped (see NEW_PAGES.md — "
-            "create those manually)."
+            f"{unchanged} unchanged (empty diff, skipped); "
+            + (
+                f"{skipped_new} new-page proposal(s) skipped (see NEW_PAGES.md "
+                "— create those manually, or re-run with --create)."
+                if not create
+                else "new pages included (--create)."
+            )
         ),
     )
     if failures:
@@ -151,4 +179,5 @@ def main(apply: bool) -> None:
 
 
 if __name__ == "__main__":
-    main(apply="--apply" in sys.argv[1:])
+    args = sys.argv[1:]
+    main(apply="--apply" in args, create="--create" in args)

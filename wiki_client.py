@@ -129,6 +129,33 @@ class WikiClient:
         content = page["revisions"][0]["slots"]["main"]["*"]
         return Page(title=title, wikitext=content)
 
+    def read_many(self, titles: list[str]) -> dict[str, str]:
+        """``title -> wikitext`` for the pages that exist, in batches of 50.
+
+        Same batching the API allows for ``last_revisions`` — one page per
+        request is ~40 round trips per sync for no reason. Missing pages are
+        absent from the result; an existing but *empty* page maps to ``""``,
+        which callers must distinguish (membership, not truthiness).
+        """
+
+        out: dict[str, str] = {}
+        for i in range(0, len(titles), 50):  # API caps titles= at 50
+            data = self._get(
+                action="query",
+                prop="revisions",
+                rvprop="content",
+                rvslots="main",
+                titles="|".join(titles[i : i + 50]),
+            )
+            for page in data.get("query", {}).get("pages", {}).values():
+                if "missing" in page:
+                    continue
+                revs = page.get("revisions")
+                out[page["title"]] = (
+                    revs[0]["slots"]["main"].get("*", "") if revs else ""
+                )
+        return out
+
     # --- write ------------------------------------------------------------
 
     def edit(self, title: str, text: str, summary: str) -> dict:

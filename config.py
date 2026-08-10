@@ -50,7 +50,7 @@ DRAFT_NAMESPACE = os.environ.get("WIKI_DRAFT_NAMESPACE", "User")
 #   cd ../pnp-knowledge/services/kb && python -m pnp_okf.api
 KB_URL = os.environ.get("PNP_KB_URL", "http://127.0.0.1:8070")
 
-# Concept types exported as wiki pages. Sessions stay KB-internal by default.
+# Concept types exported as wiki pages.
 EXPORT_TYPES = [
     "Character",
     "NPC",
@@ -60,7 +60,14 @@ EXPORT_TYPES = [
     "Event",
     "Deity",
     "Domain",
+    "Session",
 ]
+
+# Types the relevance gate below does not apply to. A Session is its own
+# session, so the "mentioned in >= MIN_SESSIONS sessions" question has no
+# meaning for it — and every episode gets a page, that is the point of the
+# episode list (../pnp-knowledge/knowledge/episodes.yaml).
+NO_GATE_TYPES = {"Session"}
 
 # Relevance gate (CHRONIST.md §5): a concept only earns a wiki page if it shows
 # up across at least this many distinct sessions. The KB tracks *everything*;
@@ -84,6 +91,13 @@ MIN_SESSIONS = 2
 # for a stubborn page: PNP_RECLAIM_SIMILARITY=0.45 python 03_generate.py
 RECLAIM_SIMILARITY = float(os.environ.get("PNP_RECLAIM_SIMILARITY", "0.8"))
 
+# The page map (see pagemap.py): the wiki-only mapping of KB concepts to wiki
+# pages. Entities are not pages — the KB wants one node per entity, the wiki
+# wants readable articles. Only exceptions are listed; anything unmentioned is
+# a page of its own. Committed, unlike the generated directories below: it is
+# curation, not cache.
+PAGEMAP_PATH = Path(__file__).resolve().parent / "wiki_pages.toml"
+
 # German category name per concept type, appended as [[Kategorie:...]].
 CATEGORY_BY_TYPE = {
     "Character": "Charaktere",
@@ -94,7 +108,13 @@ CATEGORY_BY_TYPE = {
     "Event": "Ereignisse",
     "Deity": "Gottheiten",
     "Domain": "Domänen",
+    "Session": "Folgen",
 }
+
+# The wiki page holding the episode overview table. Generated from the Session
+# concepts (see 03_generate.render_story_overview) into its KI region, so the
+# hand-written parts of the page survive each sync.
+STORY_OVERVIEW_PAGE = os.environ.get("PNP_STORY_OVERVIEW_PAGE", "Story Abschnitte")
 
 
 # --- LLM (local via Ollama) ----------------------------------------------

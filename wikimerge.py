@@ -159,8 +159,10 @@ def _split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
     )
 
 
-def _flatten_kb(kb_wikitext: str, title: str) -> tuple[str, list[tuple[str, str]]]:
-    """Drop the KB title heading and flatten every remaining heading to level 2.
+def _flatten_kb(
+    kb_wikitext: str, title: str, structured: bool = False
+) -> tuple[str, list[tuple[str, str]]]:
+    """Drop the KB title heading and reduce the rest to level-2 merge units.
 
     KB bodies wrap content as ``== Title ==`` > ``=== Sub ===`` … ``== Belege
     ==``. Flattening makes the real content units (subsections + Belege)
@@ -170,6 +172,14 @@ def _flatten_kb(kb_wikitext: str, title: str) -> tuple[str, list[tuple[str, str]
     A parent heading whose whole body was its subsections (e.g. ``Wichtige
     Merkmale``) is left empty by the flattening and is dropped — its children
     survive as siblings, so nothing is lost.
+
+    ``structured`` turns the flattening off: a composed page (several KB
+    concepts on one wiki page, see pagemap.compose_body) already carries its
+    own level-2 units — one per member, with that member's own sections nested
+    at level 3. Flattening those would dissolve the nesting and leave one flat
+    run of sections, i.e. four articles glued together instead of one article
+    with four sub-entries. Here the level-2 headings *are* the merge units and
+    ``_split_sections`` keeps everything below them inside their body.
     """
 
     out: list[str] = []
@@ -182,19 +192,21 @@ def _flatten_kb(kb_wikitext: str, title: str) -> tuple[str, list[tuple[str, str]
             if not dropped_title and _norm(heading) == title_norm:
                 dropped_title = True
                 continue  # the page name already is this heading
-            out.append(f"== {heading} ==")
+            out.append(line if structured else f"== {heading} ==")
         else:
             out.append(line)
     lead, sections = _split_sections("\n".join(out))
     return lead, [(h, b) for h, b in sections if b]
 
 
-def merge_wikitext(live: str, kb_wikitext: str, title: str) -> str:
-    return merge_wikitext_verbose(live, kb_wikitext, title)[0]
+def merge_wikitext(
+    live: str, kb_wikitext: str, title: str, structured: bool = False
+) -> str:
+    return merge_wikitext_verbose(live, kb_wikitext, title, structured)[0]
 
 
 def merge_wikitext_verbose(
-    live: str, kb_wikitext: str, title: str
+    live: str, kb_wikitext: str, title: str, structured: bool = False
 ) -> tuple[str, dict]:
     """As ``merge_wikitext``, plus the decisions taken — for the run log.
 
@@ -229,7 +241,7 @@ def merge_wikitext_verbose(
     kb_body, kb_cats = _strip_categories(kb_wikitext)
 
     live_lead, live_sections = _split_sections(live_body)
-    kb_lead, kb_sections = _flatten_kb(kb_body, title)
+    kb_lead, kb_sections = _flatten_kb(kb_body, title, structured)
 
     # Recorded before reclaiming, so this stays "the level-2 sections the live
     # page had" — reclaimed ones are reported separately.

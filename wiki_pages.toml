@@ -1,0 +1,43 @@
+# Die Seitenkarte: welche KB-Konzepte welche Wiki-Seite ergeben.
+#
+# Nur Ausnahmen stehen hier. Jedes nicht genannte Konzept bekommt wie bisher
+# eine eigene Seite; den langen Schwanz haelt schon die Relevanzschwelle
+# (config.MIN_SESSIONS) vom Wiki fern. Diese Datei ist fuer die Konzepte, die
+# die Schwelle schaffen und trotzdem keinen eigenen Artikel bekommen sollen.
+#
+#   lead = Hauptinformationsknoten. Traegt die Identitaet der Seite (Typ,
+#          Kategorie, Aliase, Zuordnung geernteter Handtexte).
+#   sub  = Nebenknoten. Erscheint nur als Abschnitt auf dieser Seite.
+#
+# Mehrere leads = gleichwertiger Merge ohne dominantes Konzept; die Seite
+# bekommt dann einen eigenen Namen. Der Merge existiert NUR hier — die
+# Wissensbasis (../pnp-knowledge/knowledge/) sieht ihn nie, dort bleibt jede
+# Entitaet ein eigener Knoten.
+#
+# Nach jeder Aenderung: python 02_extract.py && python 03_generate.py
+
+# Konzepte ganz ohne Seite. Sie bleiben in der KB und in den
+# Session-Zusammenfassungen, bekommen aber keinen Artikel.
+# Beispiel: exclude = ["events/beschwoerung_von_slix"]
+exclude = []
+
+
+# Die Untotenarmee ist kein eigenes Lemma — sie ist das, was Belorus befehligt.
+[pages."Belorus der Stille"]
+lead = ["npcs/belorus"]
+sub = ["factions/belorus_untotenarmee"]
+
+
+# Vhar'Zul wurde im Goetterkrieg in fuenf Seelen zerspalten. Keine davon ist
+# fuer sich ein Artikel wert, zusammen sind sie einer der wichtigsten
+# Kampagnenstraenge. Alle gleichwertig, also alle lead.
+# Vhar'Zul selbst behaelt seine eigene Seite — er ist der Gott, nicht ein
+# Fragment. Sythraal (der Schleier) fehlt: dazu gibt es kein KB-Konzept.
+[pages."Die fünf Seelen Vhar'Zuls"]
+lead = [
+    "deities/kollmereth",
+    "deities/thyrex",
+    "deities/ezhura",
+    "npcs/slix_vasul",
+]
+aliases = ["Die fünf Seelenfragmente", "Seelenfragmente Vhar'Zuls"]

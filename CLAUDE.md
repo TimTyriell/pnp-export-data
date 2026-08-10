@@ -26,8 +26,8 @@ after adding new reports is safe.
 
 ```
 01_inventory.py  Wiki → page index in wiki_cache/          (what already exists)
-02_extract.py    KB API vs page index → entities.json      (create|update plan;
-                                                            deterministic, no LLM)
+02_extract.py    KB API + wiki_pages.toml vs page index    (create|update plan;
+                 → entities.json + bodies.json              deterministic, no LLM)
 03_generate.py   plan + KB bodies → proposals/ Wikitext     (md2wiki.py converts
                                                             deterministically:
                                                             .wikitext per page,
@@ -35,6 +35,16 @@ after adding new reports is safe.
                                                             NEW_PAGES.md list)
 04_upload.py     reviewed proposals/ → wiki                 (gated; see below)
 ```
+
+There is **no LLM anywhere in this pipeline**, so a re-run costs no tokens —
+only HTTP round trips. Those are kept down by three things, don't undo them:
+stage 2 saves the concept bodies its alias/session call already returned into
+`wiki_cache/bodies.json` (stage 3 reads that instead of re-fetching, and the
+plan beside it comes from the same snapshot); stage 3 reads live pages through
+`WikiClient.read_many` in batches of 50 rather than one request per page; and
+stage 4 skips any proposal whose `.diff` is empty, because that edit would be a
+`nochange` round trip plus `EDIT_DELAY_S`. A *missing* `.diff` still uploads —
+absence is not proof the page is unchanged.
 
 Stages 2/3 are **deterministic** — the KB bodies are already synthesized,
 cited German markdown, so conversion cannot hallucinate. [md2wiki.py](md2wiki.py)
@@ -54,6 +64,28 @@ citations), and unions categories. Nothing hand-written is ever deleted — the
 "Persönlichkeit" and a KB one worded differently) both survive; the reviewer
 trims overlap. Do not change this to overwrite existing pages.
 
+**Entities are not pages** ([pagemap.py](pagemap.py) + the committed
+[wiki_pages.toml](wiki_pages.toml)). The KB wants one node per entity, the wiki
+wants readable articles, so a page can gather several concepts: a `lead` owns
+the page's identity (id, type, category, aliases, harvest attribution), a `sub`
+only ever appears as a section on it, and several leads are an equal-weight
+merge under a name of its own. **The merge exists only here** — never propose
+folding concepts together in `../pnp-knowledge/knowledge/`, that bundle is the
+system of record and presentation is not knowledge (ADR-001). Only exceptions
+are listed; unmapped concepts keep the 1:1 path and `compose_body` passes a
+lone lead through byte-identically, so the map cannot change a page it says
+nothing about.
+
+A composed page is **one markdown level per member**: each member gets its own
+heading and keeps its sections nested below it, so the page reads as one
+article with sub-entries. A sole lead has no heading — it *is* the page — so
+its sections are promoted to that level instead. This only survives because
+stage 3 passes `structured=True` into the merge for multi-member pages:
+`wikimerge._flatten_kb` normally flattens every heading to level 2 (right for a
+single concept, whose sections are the merge units), which on a composed page
+dissolves the nesting and leaves four articles glued end to end. If a merged
+page ever reads as a flat run of sections again, that flag is where to look.
+
 - **[config.py](config.py)** is the single source of truth for all tunables
   (wiki URL, bot creds via env, Ollama host/model, directories, `DRY_RUN`).
   Scripts import from it directly; there are no CLI flags for these values.
@@ -72,9 +104,17 @@ trims overlap. Do not change this to overwrite existing pages.
 
 Every stage writes structured events to `logs/<run_id>.jsonl` via
 [runlog.py](runlog.py) — one JSON object per line, one file per run, gitignored.
-`proposals/` is flat and keeps files from older runs, so **the run log is the
-only record of which run wrote which file** (`write` events carry `name`,
-`bytes`, `sha8`) and of *why* a page came out the way it did.
+`proposals/` is flat, so **the run log is the only record of which run wrote
+which file** (`write` events carry `name`, `bytes`, `sha8`) and of *why* a page
+came out the way it did.
+
+Stage 3 **prunes** `proposals/` at the end of each run: its own leftovers
+(`.wikitext`, `.diff`, `NEW_PAGES.md`) that this run did not write are deleted,
+with a `prune` event per file so the record outlives the file. Anything else in
+the directory is left alone — a `notizen.md` or a `.bak` is not this stage's to
+delete. Everything pruned is regenerable by re-running the stage, so review
+what you care about before the next run rather than treating the directory as
+an archive.
 
 - `run_id` = UTC timestamp + pid, or `PNP_RUN_ID` if set. One file per run means
   parallel agents never contend for the same log — each just sets its own
@@ -121,6 +161,12 @@ This service writes to a live wiki, so writes are gated by design:
 - Generated pages are meant to land in a draft/sandbox namespace
   (`config.DRAFT_NAMESPACE`, default `User`) for human review before promotion to
   live, to guard against hallucinations.
+- The VS Code launch config for stage 4 runs `01→02→03` first
+  (`.vscode/tasks.json`, `preLaunchTask`). Stage 4 only edits titles the plan
+  marks `update`, and that verdict comes from the page index — so a page a human
+  created since the last inventory stays empty forever unless the index is
+  refreshed first. The trade-off: proposals are rebuilt in the same click, so
+  read the `.diff` files after the tasks finish, not before.
 
 Do not weaken or bypass this gate (e.g. defaulting `DRY_RUN` to False, hardcoding
 `--apply`, or POSTing directly) without the user explicitly asking.

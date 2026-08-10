@@ -1,0 +1,53 @@
+{
+  // Refresh chain for the upload launch config. Stage 4 only edits pages the
+  // plan marks `update`, and "update" means "this title was in the page index
+  // when stage 2 ran" — so an index from before a page was created manually
+  // makes stage 4 skip that page forever. Re-running 01→02→03 right before the
+  // upload is what keeps the plan in step with the live wiki.
+  //
+  // Note this also regenerates proposals/, so what stage 4 uploads is always
+  // freshly built, not what was reviewed earlier. Read the .diff files after
+  // the tasks finish and before confirming the upload.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "pnp: 01 inventory",
+      "detail": "Wiki lesen → wiki_cache/page_index.json",
+      "type": "process",
+      "command": "${workspaceFolder}/fandom_env/Scripts/python.exe",
+      "args": ["01_inventory.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "panel": "shared", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "pnp: 02 plan",
+      "detail": "KB + Seitenkarte vs. Index → wiki_cache/entities.json",
+      "type": "process",
+      "command": "${workspaceFolder}/fandom_env/Scripts/python.exe",
+      "args": ["02_extract.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "panel": "shared", "clear": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "pnp: 03 generate",
+      "detail": "Plan → proposals/*.wikitext + .diff",
+      "type": "process",
+      "command": "${workspaceFolder}/fandom_env/Scripts/python.exe",
+      "args": ["03_generate.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "panel": "shared", "clear": false },
+      "problemMatcher": []
+    },
+    {
+      // The one the launch config depends on. dependsOrder "sequence" is what
+      // makes them run one after another instead of in parallel; a failing
+      // stage aborts the chain and the launch with it.
+      "label": "pnp: refresh before upload",
+      "dependsOrder": "sequence",
+      "dependsOn": ["pnp: 01 inventory", "pnp: 02 plan", "pnp: 03 generate"],
+      "problemMatcher": []
+    }
+  ]
+}
