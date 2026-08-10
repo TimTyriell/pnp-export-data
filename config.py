@@ -114,7 +114,7 @@ CATEGORY_BY_TYPE = {
 # The wiki page holding the episode overview table. Generated from the Session
 # concepts (see 03_generate.render_story_overview) into its KI region, so the
 # hand-written parts of the page survive each sync.
-STORY_OVERVIEW_PAGE = os.environ.get("PNP_STORY_OVERVIEW_PAGE", "Story Abschnitte")
+STORY_OVERVIEW_PAGE = os.environ.get("PNP_STORY_OVERVIEW_PAGE", "Stream Folgen")
 
 
 # --- LLM (local via Ollama) ----------------------------------------------

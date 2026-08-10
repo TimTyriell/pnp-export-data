@@ -204,33 +204,22 @@ def group(concepts: list[dict], pagemap: dict, events: list[dict] | None = None)
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _BELEGE_RE = re.compile(r"^#{1,6}\s*Belege\s*$", re.IGNORECASE)
-# Citation-list lines. The KB labels them with the episode id ("[P-08] Session
-# …"); the two numeric styles ("[1] …" / "1. …") are what pre-episode bundles
-# and model-invented extra citations still look like.
-_CITE_RE = re.compile(r"^(?:\[([A-Za-z0-9-]+)\]|(\d+)\.)\s+(.*)$")
 
 
-def _split_belege(body: str) -> tuple[str, dict[str, str]]:
-    """``(body without its citation section, {number: citation text})``."""
+def _strip_belege(body: str) -> str:
+    """Drop the KB's trailing ``# Belege`` citation list.
+
+    The wiki cites inline instead: md2wiki turns each ``[P-08]``/``[[P-08]]``
+    marker in the text into a link to that episode's own wiki page, so the
+    KB's numbered source list has no reader-facing role on the wiki. It stays
+    in the bundle untouched — this only concerns what gets exported.
+    """
 
     lines = body.splitlines()
     for i, line in enumerate(lines):
         if _BELEGE_RE.match(line.strip()):
-            cites: dict[str, str] = {}
-            for rest in lines[i + 1 :]:
-                m = _CITE_RE.match(rest.strip())
-                if m:
-                    cites[m.group(1) or m.group(2)] = m.group(3).strip()
-            return "\n".join(lines[:i]).rstrip(), cites
-    return body.rstrip(), {}
-
-
-# ponytail: renumbering is gone. The KB labels citations with the episode id
-# ("[P-08]"), which is globally stable, so two members of a composed page that
-# cite the same session already agree on the marker — there is nothing to
-# renumber and nothing that could collide. Bodies from a pre-episode bundle
-# keep their numbers; those collide across members, which is what regenerating
-# the bundle fixes.
+            return "\n".join(lines[:i]).rstrip()
+    return body.rstrip()
 
 
 def _promote_headings(text: str) -> str:
@@ -255,8 +244,12 @@ def _promote_headings(text: str) -> str:
 def compose_body(members: list[dict], bodies: dict[str, str]) -> str | None:
     """Merge the members' KB bodies into one page body. None if none is known.
 
+    Every member's ``# Belege`` citation list is dropped (see
+    ``_strip_belege``) — the wiki cites inline instead, via md2wiki resolving
+    each ``[P-08]``-style marker in the text to that episode's own page.
+
     A page with a single lead and nothing else — the 1:1 default, which is all
-    but a handful of pages — is passed through byte-identically, so the map
+    but a handful of pages — is otherwise passed through unchanged, so the map
     cannot change a page it says nothing about.
 
     Everything else becomes **one markdown level per member**: each member gets
@@ -272,33 +265,18 @@ def compose_body(members: list[dict], bodies: dict[str, str]) -> str | None:
     if not present:
         return None
     if len(present) == 1 and present[0][0]["role"] == "lead":
-        return present[0][1]
+        return _strip_belege(present[0][1]) + "\n"
 
     leads = [m for m, _ in present if m["role"] == "lead"]
     sole_lead = leads[0]["concept"] if len(leads) == 1 else None
 
-    labels: dict[str, str] = {}  # citation text -> label, first member wins
     parts: list[str] = []
     for member, body in present:
-        text, cites = _split_belege(body)
-        # Identical citations across members collapse onto one entry — the
-        # members were extracted from the same sessions, so they share most.
-        for label, cite in cites.items():
-            labels.setdefault(cite, label)
+        text = _strip_belege(body)
         if member["concept"] == sole_lead:
             text = _promote_headings(text)
         else:
             text = f"# {member['title']}\n\n{text}"
         parts.append(text.strip())
 
-    out = "\n\n".join(p for p in parts if p)
-    if labels:
-        # Sorted by label so the list reads chronologically — episode ids sort
-        # that way ("P-08" before "P-22", Prolog before "S1-…").
-        cites = "\n".join(
-            f"[{label}] {text}" for text, label in sorted(labels.items(), key=lambda kv: kv[1])
-        )
-        # Level 1, like a member: the citations belong to the whole page, not
-        # inside whichever member happens to come last.
-        out += f"\n\n# Belege\n\n{cites}"
-    return out + "\n"
+    return "\n\n".join(p for p in parts if p) + "\n"

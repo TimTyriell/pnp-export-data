@@ -58,8 +58,11 @@ the update path.
 ([wikimerge.py](wikimerge.py)). The live wiki pages are hand-curated
 (infoboxes, images, prose, categories); a full replace would destroy that.
 So for `action: update` the proposal keeps the live page verbatim and only
-*appends* KB sections whose heading isn't already present (plus the `Belege`
-citations), and unions categories. Nothing hand-written is ever deleted — the
+*appends* KB sections whose heading isn't already present, and unions
+categories. The KB's `# Belege` citation list itself is never proposed — it is
+dropped in `pagemap.compose_body`; the wiki cites inline instead, via
+`md2wiki` resolving each `[P-08]`/`[[P-08]]` marker in the text to that
+episode's own wiki page. Nothing hand-written is ever deleted — the
 `.diff` a reviewer sees is additions-only. Redundant sections (a human
 "Persönlichkeit" and a KB one worded differently) both survive; the reviewer
 trims overlap. Do not change this to overwrite existing pages.

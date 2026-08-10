@@ -27,6 +27,7 @@ from __future__ import annotations
 import difflib
 import json
 import re
+import unicodedata
 
 import requests
 
@@ -36,9 +37,11 @@ import runlog
 from md2wiki import (
     LinkResolver,
     markdown_to_wikitext,
+    proposal_filename,
     strip_transcription_variants,
 )
 from wiki_client import WikiClient
+import wikimerge
 from wikimerge import _norm, _HEADING_RE, merge_wikitext_verbose
 
 _STAGE = "03_generate"
@@ -144,13 +147,26 @@ def prune_proposals(keep: set[str]) -> int:
     return pruned
 
 
+def _slug(text: str) -> str:
+    """``"Staffel 1"`` -> ``"staffel-1"``, for the toggle/collapsible id pair."""
+
+    ascii_only = (
+        unicodedata.normalize("NFKD", text.lower())
+        .encode("ascii", "ignore")
+        .decode()
+    )
+    return re.sub(r"[^a-z0-9]+", "-", ascii_only).strip("-")
+
+
 def render_story_overview(plan: list[dict]) -> str:
     """The episode overview table as Wikitext.
 
-    One collapsible block per season, newest season first, episodes oldest
-    first inside it — the reading order of a campaign log. Built from the same
-    Session concepts that get their own pages, so the table and the pages can
-    never disagree about an episode's id, name or link target.
+    One collapsible block per season, oldest season first, episodes oldest
+    first inside it — the reading order of a campaign log. The newest season is
+    the one people come for, so it renders expanded and the older ones stay
+    collapsed. Built from the same Session concepts that get their own pages,
+    so the table and the pages can never disagree about an episode's id, name
+    or link target.
 
     Wikitext directly, not Markdown through md2wiki: the converter handles
     headings, lists and links, not tables, and this page *is* a table. It still
@@ -170,14 +186,26 @@ def render_story_overview(plan: list[dict]) -> str:
         return max(e["episode"].get("timestamp") or "" for e in item[1])
 
     lines: list[str] = []
-    for key, entries in sorted(seasons.items(), key=newest, reverse=True):
+    ordered = sorted(seasons.items(), key=newest)
+    for pos, (key, entries) in enumerate(ordered):
         label = entries[0]["episode"].get("season_label") or f"Staffel {key}"
         entries.sort(key=lambda e: e["episode"].get("timestamp") or "")
+        collapsed = "" if pos == len(ordered) - 1 else " mw-collapsed"
+        slug = _slug(label) or f"staffel-{_slug(key)}"
+        # Heading first, collapsible around the table only: the merge turns a
+        # KB body that does not start with a heading into an "Übersicht"
+        # section, and an empty one of those above the table reads as a bug.
+        #
+        # The heading text itself is the toggle (mw-customtoggle-<slug> paired
+        # with the collapsible's id), so the whole row clicks like the category
+        # bar in the page footer and the arrow sits beside the title. The arrow
+        # is drawn by .pnp-klapp in MediaWiki:Fandomdesktop.css — Wikitext
+        # cannot carry the <svg> icon Fandom's own chrome uses. Without that
+        # CSS the toggle still works, it just has no arrow.
         lines += [
-            '<div class="mw-collapsible mw-collapsed">',
+            f'== <span class="pnp-klapp mw-customtoggle-{slug}">{label}</span> ==',
             "",
-            f"== {label} ==",
-            "",
+            f'<div class="mw-collapsible{collapsed}" id="mw-customcollapsible-{slug}">',
             '<div class="mw-collapsible-content">',
             '{| class="fandom-table"',
             "|+",
@@ -221,22 +249,18 @@ def build_overview_proposal(
     if not table:
         return {}
 
-    if title not in live_pages:
-        # Refuse to guess: writing an overview to a title that is not the live
-        # page creates a duplicate table nobody maintains.
-        if events is not None:
-            events.append(
-                {
-                    "event": "overview_skipped",
-                    "level": "warn",
-                    "title": title,
-                    "note": "page not found live — check PNP_STORY_OVERVIEW_PAGE "
-                    "and refresh the page index (01_inventory.py)",
-                }
-            )
-        return {}
-
-    live = live_pages[title]
+    # The overview page may not exist yet — the table used to live as a section
+    # on another article. Merging against an empty page produces a fresh KI
+    # region, which stage 4 creates with --create like any other new page.
+    live = live_pages.get(title, "")
+    if not live and events is not None:
+        events.append(
+            {
+                "event": "overview_new",
+                "title": title,
+                "note": "page does not exist live — proposal is a new page",
+            }
+        )
     merged, decisions = merge_wikitext_verbose(live, table, title)
     if events is not None:
         events.append(
@@ -248,7 +272,7 @@ def build_overview_proposal(
                 "out_sha8": runlog.sha8(merged),
             }
         )
-    safe = re.sub(r'[<>:"/\\|?*]', "_", title)
+    safe = proposal_filename(title)
     diff = "\n".join(
         difflib.unified_diff(
             live.splitlines(),
@@ -305,7 +329,12 @@ def generate_proposals(
             m["concept"]: e["wiki_title"]
             for e in plan
             for m in pagemap.members_of(e)
-        }
+        },
+        episode_titles={
+            e["episode"]["episode"]: e["wiki_title"]
+            for e in plan
+            if e.get("episode") and e["episode"].get("episode")
+        },
     )
     outputs: dict[str, str] = {}
     new_pages: list[dict] = []
@@ -324,7 +353,7 @@ def generate_proposals(
         kb_wikitext = markdown_to_wikitext(
             strip_transcription_variants(body), resolver, category
         )
-        safe_title = re.sub(r'[<>:"/\\|?*]', "_", entity["wiki_title"])
+        safe_title = proposal_filename(entity["wiki_title"])
 
         if entity["action"] == "update":
             live = live_pages.get(entity["wiki_title"], "")
@@ -378,7 +407,17 @@ def generate_proposals(
             )
             outputs[f"{safe_title}.diff"] = diff + "\n"
         else:
-            outputs[f"{safe_title}.wikitext"] = kb_wikitext
+            # A page the agent creates is born with its KI region. Without the
+            # markers the *next* sync sees ki_state='absent' and has to guess,
+            # per live section, which text is KB output — and it guesses wrong
+            # whenever the KB render regroups its headings, leaving the old
+            # body outside the region and appending the new one beside it.
+            # Categories stay outside: they belong to the page, not the region.
+            body, _, categories = kb_wikitext.partition("\n[[Kategorie:")
+            outputs[f"{safe_title}.wikitext"] = (
+                wikimerge.render_ki_region(body)
+                + (f"\n\n[[Kategorie:{categories}" if categories else "\n")
+            )
             new_pages.append(entity)
 
     if new_pages:

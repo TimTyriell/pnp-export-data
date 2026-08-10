@@ -6,8 +6,9 @@ A full replace would destroy that, so updates merge instead:
   * The live page is kept **verbatim** — lead/infobox, every section, every
     category. Nothing human-written is ever deleted.
   * From the KB proposal, only sections whose heading is *not already on the
-    live page* are appended (plus the citation section, ``Belege``). The KB
-    intro becomes an ``Übersicht`` section if the page has none.
+    live page* are appended. The KB intro becomes an ``Übersicht`` section if
+    the page has none. The KB's ``Belege`` citation section never reaches here
+    at all — it is dropped upstream in ``pagemap.compose_body``.
   * Categories are unioned (live order first, then KB extras).
 
 Heading matching is fuzzy on text only (case/whitespace-insensitive) and
@@ -64,6 +65,24 @@ def sha8(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
 
 
+def normalize_for_sha(text: str) -> str:
+    """Whitespace MediaWiki is free to change, removed before hashing.
+
+    The wiki does not store a page byte-for-byte as it was POSTed: the parser
+    reflows blank lines around block-level HTML, so a region containing a
+    ``<div>`` comes back with lines we never wrote. Hashing the raw text then
+    reports the page as edited by a human on the very next sync, which freezes
+    it and harvests our own output as if it were someone's prose.
+
+    Blank lines go entirely rather than being collapsed: the parser both adds
+    and removes them, so any rule that keeps some of them still breaks on the
+    next construct. Only whitespace is touched — a real edit still changes the
+    checksum.
+    """
+
+    return "\n".join(s for s in (line.strip() for line in text.splitlines()) if s)
+
+
 def render_ki_region(content: str) -> str:
     """Wrap ``content`` in the KI markers behind the visible label.
 
@@ -77,7 +96,7 @@ def render_ki_region(content: str) -> str:
         f"{content.strip()}"
     )
     return (
-        f"<!-- KI-Abschnitt: {KI_NOTICE} sha={sha8(body)} -->\n"
+        f"<!-- KI-Abschnitt: {KI_NOTICE} sha={sha8(normalize_for_sha(body))} -->\n"
         f"{body}\n"
         f"<!-- /KI-Abschnitt -->"
     )
@@ -111,7 +130,10 @@ def ki_region_state(live: str) -> tuple[str, str | None]:
     if split is None:
         return "absent", None
     _, body, declared, _ = split
-    return ("clean" if sha8(body) == declared else "edited"), body
+    # Raw first for regions written before the normalisation existed; both
+    # forms agree for any body the wiki did not reflow.
+    clean = declared in (sha8(body), sha8(normalize_for_sha(body)))
+    return ("clean" if clean else "edited"), body
 
 
 def _norm(text: str) -> str:
@@ -164,10 +186,10 @@ def _flatten_kb(
 ) -> tuple[str, list[tuple[str, str]]]:
     """Drop the KB title heading and reduce the rest to level-2 merge units.
 
-    KB bodies wrap content as ``== Title ==`` > ``=== Sub ===`` … ``== Belege
-    ==``. Flattening makes the real content units (subsections + Belege)
-    top-level so they can be merged into the live page; the intro before the
-    first heading is returned as the lead.
+    KB bodies wrap content as ``== Title ==`` > ``=== Sub ===`` …. Flattening
+    makes the real content units (the subsections) top-level so they can be
+    merged into the live page; the intro before the first heading is returned
+    as the lead.
 
     A parent heading whose whole body was its subsections (e.g. ``Wichtige
     Merkmale``) is left empty by the flattening and is dropped — its children

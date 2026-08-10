@@ -27,6 +27,7 @@ import requests
 import config
 import pagemap
 import runlog
+from md2wiki import wiki_safe_title
 
 _STAGE = "02_extract"
 
@@ -82,7 +83,18 @@ def fetch_concepts() -> tuple[list[dict], dict[str, str]]:
                 f"{config.KB_URL}/concepts", params={"type": ctype}, timeout=30
             )
             resp.raise_for_status()
-            concepts.extend(resp.json())
+            batch = resp.json()
+            # A type that answers 200 with an empty list means the KB is up but
+            # not serving its bundle. Continuing looks harmless — the plan just
+            # gets smaller — but the concept->page map is built from the plan,
+            # so every link on every page silently degrades to plain text and
+            # the next upload writes that over good pages. Stop instead.
+            if not batch:
+                raise SystemExit(
+                    f"KB API returned no {ctype} concepts. The bundle is not "
+                    f"being served — check {config.KB_URL} before re-running."
+                )
+            concepts.extend(batch)
         # Aliases live in the full frontmatter, not the listing. The same
         # response carries body_md, so the session count is free here.
         for c in concepts:
@@ -130,7 +142,10 @@ def plan_entities(
     seen_titles: dict[str, str] = {}
     for c in sorted(concepts, key=lambda c: c["concept"]):
         title = (c.get("title") or c["concept"].rsplit("/", 1)[-1]).strip()
-        names = [title] + [str(a) for a in c.get("aliases") or []]
+        # The sanitised form is what the page is actually called live, so it
+        # has to be one of the names we look for — otherwise a KB title with a
+        # "#" never recognises its own page and stays "create" forever.
+        names = [title, wiki_safe_title(title)] + [str(a) for a in c.get("aliases") or []]
         # The live page the match landed on — its *own* title, which is not the
         # KB title when an alias matched (KB "Königreich Zebros" vs. live
         # "Zebros"). wiki_title has to be that one: stage 3 fetches the live
@@ -180,7 +195,7 @@ def plan_entities(
             "id": c.get("id"),
             "type": c.get("type"),
             "title": title,
-            "wiki_title": matched or title,
+            "wiki_title": matched or wiki_safe_title(title),
             "action": action,
             "members": pagemap.members_of({**c, "title": title}),
         }

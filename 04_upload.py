@@ -30,18 +30,35 @@ import time
 
 import config
 import runlog
+from md2wiki import proposal_filename
 from wiki_client import WikiClient
 
 _STAGE = "04_upload"
 
 
-def _update_titles() -> set[str] | None:
-    """Wiki titles the plan marked ``update``; None if the plan is missing."""
-
+def _load_plan() -> list[dict] | None:
     plan_path = config.WIKI_CACHE_DIR / "entities.json"
     if not plan_path.exists():
         return None
-    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    return json.loads(plan_path.read_text(encoding="utf-8"))
+
+
+def _titles_by_stem(plan: list[dict]) -> dict[str, str]:
+    """``proposals/`` stem -> the real wiki title.
+
+    A filename cannot hold every character a wiki title can ("/" makes a
+    subpage on the wiki but is a path separator here), so the stem is a lossy
+    form. Taking the title from it uploaded "Katze (Ajani / Günther)" as
+    "Katze (Ajani _ Günther)", which the wiki then stored with a space. The
+    plan is where the title actually lives.
+    """
+
+    return {proposal_filename(e["wiki_title"]): e["wiki_title"] for e in plan}
+
+
+def _update_titles(plan: list[dict]) -> set[str]:
+    """Wiki titles the plan marked ``update``."""
+
     titles = {e["wiki_title"] for e in plan if e.get("action") == "update"}
     # Not a concept, so never in the plan — but it is an existing page that
     # stage 3 merged, and it must go up the same way (see render_story_overview).
@@ -50,7 +67,7 @@ def _update_titles() -> set[str] | None:
     return titles
 
 
-def main(apply: bool, create: bool = False) -> None:
+def main(apply: bool, create: bool = False, only: str | None = None) -> None:
     """Upload reviewed proposals.
 
     *create* also writes proposals for pages that do not exist yet. Off by
@@ -58,6 +75,9 @@ def main(apply: bool, create: bool = False) -> None:
     is not reviewable as a diff (there is nothing to diff against), so it is
     a decision a human makes per batch. MediaWiki's ``action=edit`` creates a
     missing page with the same call, so there is no second code path.
+
+    *only* restricts the run to titles containing that substring — how a big
+    batch gets rolled out: one page live, look at it, then the rest.
     """
 
     runlog.log(
@@ -71,6 +91,10 @@ def main(apply: bool, create: bool = False) -> None:
         return
 
     proposals = sorted(config.PROPOSALS_DIR.glob("*.wikitext"))
+    if only:
+        proposals = [p for p in proposals if only.lower() in p.stem.lower()]
+        runlog.log(_STAGE, "filter", only=only, matched=len(proposals),
+                   echo=f"--only {only!r}: {len(proposals)} proposal(s)")
     if not proposals:
         runlog.log(
             _STAGE, "abort", level="warn", reason="no_proposals",
@@ -78,8 +102,8 @@ def main(apply: bool, create: bool = False) -> None:
         )
         return
 
-    updates = _update_titles()
-    if updates is None:
+    plan = _load_plan()
+    if plan is None:
         runlog.log(
             _STAGE, "abort", level="warn", reason="no_plan",
             echo="wiki_cache/entities.json missing — cannot tell updates from "
@@ -87,6 +111,8 @@ def main(apply: bool, create: bool = False) -> None:
                  "pages).",
         )
         return
+    updates = _update_titles(plan)
+    title_by_stem = _titles_by_stem(plan)
 
     client = WikiClient()
     do_apply = apply and not config.DRY_RUN
@@ -96,7 +122,9 @@ def main(apply: bool, create: bool = False) -> None:
     uploaded = skipped_new = unchanged = 0
     failures: list[tuple[str, str]] = []
     for path in proposals:
-        title = path.stem
+        # The stem is a lossy form of the title; the plan holds the real one.
+        # Pages with no plan entry (the episode overview) keep the stem.
+        title = title_by_stem.get(path.stem, path.stem)
         if title not in updates and not create:
             skipped_new += 1  # a proposed *new* page — humans create these
             runlog.log(_STAGE, "skip", title=title, reason="create")
@@ -180,4 +208,5 @@ def main(apply: bool, create: bool = False) -> None:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    main(apply="--apply" in args, create="--create" in args)
+    only = args[args.index("--only") + 1] if "--only" in args else None
+    main(apply="--apply" in args, create="--create" in args, only=only)
