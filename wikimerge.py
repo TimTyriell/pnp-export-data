@@ -6,26 +6,148 @@ A full replace would destroy that, so updates merge instead:
   * The live page is kept **verbatim** — lead/infobox, every section, every
     category. Nothing human-written is ever deleted.
   * From the KB proposal, only sections whose heading is *not already on the
-    live page* are appended (plus the citation section, ``Belege``). The KB
-    intro becomes an ``Übersicht`` section if the page has none.
+    live page* are appended. The KB intro becomes an ``Übersicht`` section if
+    the page has none. The KB's ``Belege`` citation section never reaches here
+    at all — it is dropped upstream in ``pagemap.compose_body``.
   * Categories are unioned (live order first, then KB extras).
 
-Heading matching is fuzzy on text only (case/whitespace-insensitive), so a
-human "Persönlichkeit" and a KB "Persönlichkeit" won't double up — but
-genuinely different headings both survive, and the reviewer trims any
-semantic overlap. The ``.diff`` a reviewer sees is therefore additions-only.
+Heading matching is fuzzy on text only (case/whitespace-insensitive) and
+**level-insensitive** — a live ``=== Überblick ===`` blocks the KB's
+``Überblick`` just as a ``== Überblick ==`` does. That matters because
+md2wiki renders the KB's ``## Foo`` one level deeper (``=== Foo ===``), so a
+page filled from a `create` proposal carries level-3 sections; matching only
+level-2 headings made such a page look section-less and appended the entire
+article again. Genuinely different headings still both survive, and the
+reviewer trims any semantic overlap. The ``.diff`` a reviewer sees is
+therefore additions-only.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
+from difflib import SequenceMatcher
+
+import config
 
 _HEADING_RE = re.compile(r"^(={2,6})\s*(.*?)\s*\1\s*$")
 _CATEGORY_RE = re.compile(r"^\[\[\s*Kategorie\s*:.*?\]\]\s*$", re.IGNORECASE)
 
+# The KI-maintained region. Every page is two parts: what the group wrote by
+# hand above, and this region below. Humans may edit inside it — the checksum in
+# the opening marker is what tells a later sync whether they did: it records the
+# text this pipeline last wrote. Content still matching it is ours to replace;
+# content that drifted is a human contribution and must reach the KB before
+# anything overwrites it (knowledge/sources/, per pnp_okf.context). The markers
+# are HTML comments and invisible on the wiki, so the visible label below is
+# what actually shows a reader which half of the page they are in.
+KI_START_RE = re.compile(
+    r"^<!--\s*KI-Abschnitt\b[^>]*?\bsha=([0-9a-f]{8})\b[^>]*-->\s*$", re.MULTILINE
+)
+KI_END_RE = re.compile(r"^<!--\s*/KI-Abschnitt\s*-->\s*$", re.MULTILINE)
+
+KI_NOTICE = (
+    "Automatisch gepflegt durch KI aus der Wissensbasis. Änderungen hier sind "
+    "erlaubt und werden beim nächsten Abgleich in die Wissensbasis übernommen, "
+    "bevor der Abschnitt neu geschrieben wird."
+)
+
+# Shown on the page itself, once, as the divider between the hand-written part
+# and the generated one.
+KI_LABEL = "Lindo Lauts Magisches Notizbuch:"
+KI_LABEL_HINT = (
+    "Teils KI generierte Inhalte, Inhalte werden gespeichert, Struktur und "
+    "Formulierungen können sich aber ändern."
+)
+
+
+def sha8(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+def normalize_for_sha(text: str) -> str:
+    """Whitespace MediaWiki is free to change, removed before hashing.
+
+    The wiki does not store a page byte-for-byte as it was POSTed: the parser
+    reflows blank lines around block-level HTML, so a region containing a
+    ``<div>`` comes back with lines we never wrote. Hashing the raw text then
+    reports the page as edited by a human on the very next sync, which freezes
+    it and harvests our own output as if it were someone's prose.
+
+    Blank lines go entirely rather than being collapsed: the parser both adds
+    and removes them, so any rule that keeps some of them still breaks on the
+    next construct. Only whitespace is touched — a real edit still changes the
+    checksum.
+    """
+
+    return "\n".join(s for s in (line.strip() for line in text.splitlines()) if s)
+
+
+def render_ki_region(content: str) -> str:
+    """Wrap ``content`` in the KI markers behind the visible label.
+
+    The checksum covers label and content together — it is simply what sits
+    between the markers, so a later sync compares like for like.
+    """
+
+    body = (
+        "----\n"
+        f"'''{KI_LABEL}''' <small>{KI_LABEL_HINT}</small>\n\n"
+        f"{content.strip()}"
+    )
+    return (
+        f"<!-- KI-Abschnitt: {KI_NOTICE} sha={sha8(normalize_for_sha(body))} -->\n"
+        f"{body}\n"
+        f"<!-- /KI-Abschnitt -->"
+    )
+
+
+def split_ki_region(text: str) -> tuple[str, str, str, str] | None:
+    """``(before, region_body, declared_sha, after)`` or None if unmarked."""
+
+    start = KI_START_RE.search(text)
+    if not start:
+        return None
+    end = KI_END_RE.search(text, start.end())
+    if not end:
+        return None
+    return (
+        text[: start.start()],
+        text[start.end() : end.start()].strip(),
+        start.group(1),
+        text[end.end() :],
+    )
+
+
+def ki_region_state(live: str) -> tuple[str, str | None]:
+    """``(state, region_body)`` — ``absent``, ``clean`` or ``edited``.
+
+    ``edited`` means a human changed the region since we wrote it, so its text
+    is knowledge we do not have yet and must not overwrite.
+    """
+
+    split = split_ki_region(live)
+    if split is None:
+        return "absent", None
+    _, body, declared, _ = split
+    # Raw first for regions written before the normalisation existed; both
+    # forms agree for any body the wiki did not reflow.
+    clean = declared in (sha8(body), sha8(normalize_for_sha(body)))
+    return ("clean" if clean else "edited"), body
+
 
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _similarity(a: str, b: str) -> float:
+    """0..1 on normalised text. Only ever used to recognise our own drifted
+    output, never to decide that two human sections mean the same thing."""
+
+    na, nb = _norm(a), _norm(b)
+    if not na or not nb:
+        return 0.0
+    return SequenceMatcher(None, na, nb).ratio()
 
 
 def _strip_categories(text: str) -> tuple[str, list[str]]:
@@ -59,13 +181,27 @@ def _split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
     )
 
 
-def _flatten_kb(kb_wikitext: str, title: str) -> tuple[str, list[tuple[str, str]]]:
-    """Drop the KB title heading and flatten every remaining heading to level 2.
+def _flatten_kb(
+    kb_wikitext: str, title: str, structured: bool = False
+) -> tuple[str, list[tuple[str, str]]]:
+    """Drop the KB title heading and reduce the rest to level-2 merge units.
 
-    KB bodies wrap content as ``== Title ==`` > ``=== Sub ===`` … ``== Belege
-    ==``. Flattening makes the real content units (subsections + Belege)
-    top-level so they can be merged into the live page; the intro before the
-    first heading is returned as the lead.
+    KB bodies wrap content as ``== Title ==`` > ``=== Sub ===`` …. Flattening
+    makes the real content units (the subsections) top-level so they can be
+    merged into the live page; the intro before the first heading is returned
+    as the lead.
+
+    A parent heading whose whole body was its subsections (e.g. ``Wichtige
+    Merkmale``) is left empty by the flattening and is dropped — its children
+    survive as siblings, so nothing is lost.
+
+    ``structured`` turns the flattening off: a composed page (several KB
+    concepts on one wiki page, see pagemap.compose_body) already carries its
+    own level-2 units — one per member, with that member's own sections nested
+    at level 3. Flattening those would dissolve the nesting and leave one flat
+    run of sections, i.e. four articles glued together instead of one article
+    with four sub-entries. Here the level-2 headings *are* the merge units and
+    ``_split_sections`` keeps everything below them inside their body.
     """
 
     out: list[str] = []
@@ -78,20 +214,138 @@ def _flatten_kb(kb_wikitext: str, title: str) -> tuple[str, list[tuple[str, str]
             if not dropped_title and _norm(heading) == title_norm:
                 dropped_title = True
                 continue  # the page name already is this heading
-            out.append(f"== {heading} ==")
+            out.append(line if structured else f"== {heading} ==")
         else:
             out.append(line)
-    return _split_sections("\n".join(out))
+    lead, sections = _split_sections("\n".join(out))
+    return lead, [(h, b) for h, b in sections if b]
 
 
-def merge_wikitext(live: str, kb_wikitext: str, title: str) -> str:
-    live_body, live_cats = _strip_categories(live)
+def merge_wikitext(
+    live: str, kb_wikitext: str, title: str, structured: bool = False
+) -> str:
+    return merge_wikitext_verbose(live, kb_wikitext, title, structured)[0]
+
+
+def merge_wikitext_verbose(
+    live: str, kb_wikitext: str, title: str, structured: bool = False
+) -> tuple[str, dict]:
+    """As ``merge_wikitext``, plus the decisions taken — for the run log.
+
+    The merge itself is silent by design (pure function, no I/O); the caller
+    logs the returned dict. Without it a bad merge is only visible by diffing
+    the output file by hand.
+    """
+
+    ki_state, region_body = ki_region_state(live)
+    if ki_state == "edited":
+        # A human wrote into the KI region, so it holds knowledge the KB does
+        # not have. Touching the page now would destroy it. Hands off until the
+        # text has been harvested into knowledge/sources/ and re-synthesized —
+        # then the region is ours to rewrite again.
+        return live, {
+            "live_bytes": len(live),
+            "ki_state": "edited",
+            "harvest": region_body,
+            "live_headings": [],
+            "live_headings_all": [],
+            "kb_headings": [],
+            "appended": [],
+            "skipped": [],
+            "out_bytes": len(live),
+        }
+
+    # Everything outside the region is human territory and stays verbatim.
+    split = split_ki_region(live)
+    human_part = (split[0] + split[3]) if split else live
+
+    live_body, live_cats = _strip_categories(human_part)
     kb_body, kb_cats = _strip_categories(kb_wikitext)
 
     live_lead, live_sections = _split_sections(live_body)
-    kb_lead, kb_sections = _flatten_kb(kb_body, title)
+    kb_lead, kb_sections = _flatten_kb(kb_body, title, structured)
 
-    live_headings = {_norm(h) for h, _ in live_sections}
+    # Recorded before reclaiming, so this stays "the level-2 sections the live
+    # page had" — reclaimed ones are reported separately.
+    live_section_headings = [h for h, _ in live_sections]
+
+    reclaimed: list[str] = []
+    if ki_state == "absent":
+        # Legacy page: earlier syncs appended KB sections inline, before the
+        # KI region existed. Those are ours and belong inside it — otherwise
+        # they count as human text and stay frozen forever. Byte-identity is
+        # too strict to find them (the KB has been regenerated since, and
+        # citation numbering was corrected by hand), so reclaim on similarity:
+        # a section close enough to today's KB text is drifted KI output, a
+        # rewritten one is a human's and stays outside, untouched.
+        kb_bodies = {_norm(h): b for h, b in kb_sections}
+        kept = []
+        for heading, body in live_sections:
+            same = kb_bodies.get(_norm(heading))
+            score = _similarity(body, same) if same is not None else 0.0
+            if score >= config.RECLAIM_SIMILARITY:
+                reclaimed.append(heading)
+            else:
+                kept.append((heading, body))
+        live_sections = kept
+
+        # A page seeded from a `create` proposal is KI output end to end, and
+        # its headings are level 3 — so it has no level-2 section to reclaim
+        # one by one and the loop above finds nothing. Judge the whole body
+        # instead: close enough to today's KB render means the page *is* the
+        # region, and nothing on it is human.
+        if not live_sections and live_lead:
+            whole_kb = "\n\n".join(
+                [kb_lead] + [b for _, b in kb_sections]
+            ).strip()
+            if _similarity(live_lead, whole_kb) >= config.RECLAIM_SIMILARITY:
+                reclaimed.append("(ganze Seite)")
+                live_lead = ""
+
+    # An empty hand-written heading whose content the KB supplies is a shell:
+    # the section it announces is the one sitting in the region right below it,
+    # so it left the label stranded under a heading with nothing under it.
+    # Dropping it removes no text — only the duplicate heading — and lets the
+    # KB fill that section inside the region where it belongs. An empty heading
+    # the KB does *not* know stays: that one is a human's own placeholder.
+    kb_heading_norms = {_norm(h) for h, _ in kb_sections}
+    dropped_empty = [
+        h
+        for h, b in live_sections
+        if not b.strip() and _norm(h) in kb_heading_norms
+    ]
+    if dropped_empty:
+        live_sections = [
+            (h, b) for h, b in live_sections if h not in dropped_empty
+        ]
+
+    # Same shell, one case further: an empty heading at the very end of the
+    # hand-written part sits directly on top of the label whatever it is called
+    # (``Wichtige Merkmale`` survives _flatten_kb only on some concepts, so the
+    # rule above misses it there). Trailing and empty means the label would
+    # open under a heading announcing nothing.
+    while live_sections and not live_sections[-1][1].strip():
+        dropped_empty.append(live_sections.pop()[0])
+
+    # Match against EVERY heading on the live page, at any level — not just the
+    # level-2 ones _split_sections carves sections from. md2wiki renders the
+    # KB's "## Foo" as "=== Foo ===", so a page seeded from a `create` proposal
+    # (and any page a human wrote with level-3 sections) has no level-2 heading
+    # at all. Comparing only level-2 headings made those pages look
+    # section-less, so every KB section counted as new and the whole article
+    # was appended a second time on the next sync.
+    # Built from what actually stays as human content, not from the original
+    # page: a reclaimed section belongs to the KI region now, so its heading
+    # must NOT block the KB from putting it there. Scanning live_body instead
+    # left the region empty and blanked pages that were reclaimed whole.
+    retained = "\n".join(
+        [live_lead] + [f"== {h} ==\n{b}" for h, b in live_sections]
+    )
+    live_headings = {
+        _norm(m.group(2))
+        for m in (_HEADING_RE.match(line) for line in retained.splitlines())
+        if m
+    }
 
     appended: list[tuple[str, str]] = []
     if kb_lead and "übersicht" not in live_headings:
@@ -105,11 +359,18 @@ def merge_wikitext(live: str, kb_wikitext: str, title: str) -> str:
         parts.append(live_lead)
     for heading, body in live_sections:
         parts.append(f"== {heading} ==\n\n{body}".rstrip())
+
+    # The KI-maintained block is rebuilt from the KB on every sync, so new
+    # findings from later sessions actually reach the page — appending only
+    # once meant a section could never be revised again.
+    region_parts: list[str] = []
     for heading, body in appended:
         block = f"== {heading} =="
         if body:
             block += f"\n\n{body}"
-        parts.append(block)
+        region_parts.append(block)
+    if region_parts:
+        parts.append(render_ki_region("\n\n".join(region_parts)))
 
     live_cat_norms = {_norm(c) for c in live_cats}
     cats = live_cats + [c for c in kb_cats if _norm(c) not in live_cat_norms]
@@ -117,4 +378,21 @@ def merge_wikitext(live: str, kb_wikitext: str, title: str) -> str:
     text = "\n\n".join(p for p in parts if p).strip() + "\n"
     if cats:
         text += "\n" + "\n".join(cats) + "\n"
-    return text
+
+    appended_headings = [h for h, _ in appended]
+    decisions = {
+        "live_bytes": len(live),
+        "ki_state": ki_state,
+        "harvest": None,
+        "reclaimed": reclaimed,
+        "dropped_empty": dropped_empty,
+        # Structural (level-2 sections) vs. everything matched against; they
+        # differ exactly on the pages that used to double up.
+        "live_headings": live_section_headings,
+        "live_headings_all": sorted(live_headings),
+        "kb_headings": [h for h, _ in kb_sections],
+        "appended": appended_headings,
+        "skipped": [h for h, _ in kb_sections if h not in appended_headings],
+        "out_bytes": len(text),
+    }
+    return text, decisions

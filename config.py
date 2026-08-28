@@ -50,8 +50,53 @@ DRAFT_NAMESPACE = os.environ.get("WIKI_DRAFT_NAMESPACE", "User")
 #   cd ../pnp-knowledge/services/kb && python -m pnp_okf.api
 KB_URL = os.environ.get("PNP_KB_URL", "http://127.0.0.1:8070")
 
-# Concept types exported as wiki pages. Sessions stay KB-internal by default.
-EXPORT_TYPES = ["Character", "NPC", "Location", "Faction", "Item", "Event"]
+# Concept types exported as wiki pages.
+EXPORT_TYPES = [
+    "Character",
+    "NPC",
+    "Location",
+    "Faction",
+    "Item",
+    "Event",
+    "Deity",
+    "Domain",
+    "Session",
+]
+
+# Types the relevance gate below does not apply to. A Session is its own
+# session, so the "mentioned in >= MIN_SESSIONS sessions" question has no
+# meaning for it — and every episode gets a page, that is the point of the
+# episode list (../pnp-knowledge/knowledge/episodes.yaml).
+NO_GATE_TYPES = {"Session"}
+
+# Relevance gate (CHRONIST.md §5): a concept only earns a wiki page if it shows
+# up across at least this many distinct sessions. The KB tracks *everything*;
+# the wiki is a reference work, and 900 one-mention stubs nobody maintains are
+# worse than 100 good pages. Counted from the "Session <date>" citations in the
+# concept body (see 02_extract.py). Pages that already exist live are never
+# filtered — a human created them, that decision beats the threshold. Set to 1
+# to export every concept again.
+MIN_SESSIONS = 2
+
+# How similar a live section must be to what the KB renders today before the
+# merge reclaims it into the KI region (see wikimerge.py). Pages synced before
+# the region existed carry KB text inline; it has since drifted (the KB was
+# regenerated, citation numbering was corrected), so byte-identity finds
+# nothing. 0.8 catches those while leaving genuinely rewritten sections outside,
+# where they stay untouched. Lower = reclaims more aggressively.
+#
+# **Migration-only.** It is consulted for a page whose KI region is `absent`.
+# Once a page has been synced with markers its state is `clean` or `edited`
+# forever after, and this value is never read for it again. Override per run
+# for a stubborn page: PNP_RECLAIM_SIMILARITY=0.45 python 03_generate.py
+RECLAIM_SIMILARITY = float(os.environ.get("PNP_RECLAIM_SIMILARITY", "0.8"))
+
+# The page map (see pagemap.py): the wiki-only mapping of KB concepts to wiki
+# pages. Entities are not pages — the KB wants one node per entity, the wiki
+# wants readable articles. Only exceptions are listed; anything unmentioned is
+# a page of its own. Committed, unlike the generated directories below: it is
+# curation, not cache.
+PAGEMAP_PATH = Path(__file__).resolve().parent / "wiki_pages.toml"
 
 # German category name per concept type, appended as [[Kategorie:...]].
 CATEGORY_BY_TYPE = {
@@ -61,7 +106,15 @@ CATEGORY_BY_TYPE = {
     "Faction": "Fraktionen",
     "Item": "Gegenstände",
     "Event": "Ereignisse",
+    "Deity": "Gottheiten",
+    "Domain": "Domänen",
+    "Session": "Folgen",
 }
+
+# The wiki page holding the episode overview table. Generated from the Session
+# concepts (see 03_generate.render_story_overview) into its KI region, so the
+# hand-written parts of the page survive each sync.
+STORY_OVERVIEW_PAGE = os.environ.get("PNP_STORY_OVERVIEW_PAGE", "Stream Folgen")
 
 
 # --- LLM (local via Ollama) ----------------------------------------------
@@ -91,9 +144,32 @@ WIKI_CACHE_DIR = ROOT / "wiki_cache"
 # proposed/ diff here; nothing is uploaded until approved. Gitignored.
 PROPOSALS_DIR = ROOT / "proposals"
 
+# Human prose harvested from the KI region of a live wiki page (see
+# wikimerge.py). This service stays a read-only client of the KB — it never
+# writes into ../pnp-knowledge. Harvested text lands here for a human to move
+# into knowledge/sources/ via the usual ingest branch + PR, after which the KB
+# absorbs it and the region is regenerated including it. Gitignored.
+HARVEST_DIR = ROOT / "harvest"
+
+# One JSONL event log per run (see runlog.py). proposals/ is flat and mixes
+# runs, so the log is the only record of which run wrote which file — and of
+# the merge decisions behind it. Gitignored.
+LOGS_DIR = ROOT / "logs"
+
+# Machine-readable status snapshot for the pnp-dashboard service (see
+# ../pnp-knowledge/docs/architecture/status-schema.md). Written by
+# 05_report.py alongside the human-readable reports. Gitignored.
+STATUS_DIR = ROOT / "status"
+
 
 # --- Review gate ----------------------------------------------------------
 
 # When True (default), stage 4 (upload) refuses to write to the wiki and only
 # prints/serializes the diff. Set to False (or pass --apply) to actually upload.
 DRY_RUN = os.environ.get("FANDOM_DRY_RUN", "1") not in ("0", "false", "False")
+
+# Seconds to wait between consecutive edits. Fandom rate-limits bulk writes —
+# a full sync without a gap trips "ratelimited" part way through and silently
+# loses the rest of the batch. Uploads are idempotent, so a tripped run is
+# recoverable by re-running, but pacing avoids the round trip.
+EDIT_DELAY_S = float(os.environ.get("FANDOM_EDIT_DELAY_S", "3"))

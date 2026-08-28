@@ -13,10 +13,14 @@ from __future__ import annotations
 import json
 
 import config
+import runlog
 from wiki_client import WikiClient
+
+_STAGE = "01_inventory"
 
 
 def main() -> None:
+    runlog.log(_STAGE, "stage_start")
     client = WikiClient()
     titles = client.all_pages(namespace=0)
 
@@ -26,7 +30,10 @@ def main() -> None:
         json.dumps(sorted(titles), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    print(f"Wrote {len(titles)} page titles to {index_path}")
+    runlog.log(
+        _STAGE, "stage_end", pages=len(titles),
+        echo=f"Wrote {len(titles)} page titles to {index_path}",
+    )
 
 
 if __name__ == "__main__":

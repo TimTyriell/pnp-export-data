@@ -19,6 +19,36 @@ und lädt sie nach einem **Review-Gate** hoch.
 04_upload.py     geprüfte Vorschläge → Wiki (nur mit --apply + FANDOM_DRY_RUN=0)
 ```
 
+## Seitenkarte (`wiki_pages.toml`)
+
+Die Wissensbasis ist ein Graph und will pro Entität einen Knoten — über tausend,
+bis hinunter zur einzelnen Untotenarmee. Das Wiki ist ein Nachschlagewerk und
+will lesbare Artikel. **Entitäten sind darum keine Seiten.**
+[wiki_pages.toml](wiki_pages.toml) ist die einzige Stelle, die zwischen beidem
+übersetzt — und sie liegt hier, nicht in `pnp-knowledge`: ein Merge, den es nur
+der Lesbarkeit wegen gibt, hat in der Wissensbasis nichts zu suchen (ADR-001).
+
+Nur **Ausnahmen** stehen drin; alles Ungenannte bleibt wie bisher eine eigene
+Seite, und den langen Schwanz hält schon `config.MIN_SESSIONS` fern.
+
+```toml
+exclude = ["events/beschwoerung_von_slix"]   # gar keine Seite
+
+[pages."Belorus der Stille"]                 # 1:N, ein Leitknoten
+lead = ["npcs/belorus"]
+sub  = ["factions/belorus_untotenarmee"]     # nur ein Abschnitt dort
+
+[pages."Die fünf Seelen Vhar'Zuls"]          # 1:N, alle gleichwertig
+lead = ["deities/kollmereth", "deities/thyrex", "deities/ezhura", "npcs/slix_vasul"]
+```
+
+`lead` trägt die Identität der Seite (Typ, Kategorie, Aliase, Zuordnung
+geernteter Handtexte), `sub` erscheint nur als Abschnitt. Links auf ein
+zusammengeführtes Konzept landen automatisch auf der Seite, die es jetzt
+abdeckt. Nach jeder Änderung `02_extract.py` und `03_generate.py` neu laufen
+lassen; das Runlog meldet `member_has_live_page`, wenn eine dadurch verwaiste
+Live-Seite eine Weiterleitung braucht.
+
 ## Setup
 
 ```bash

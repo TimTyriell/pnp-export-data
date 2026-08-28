@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "pnp-export-data: 04_upload.py --apply",
+      "type": "debugpy",
+      "request": "launch",
+      // Always re-fetch first (see tasks.json). Without a fresh page index a
+      // page created by hand since the last run still counts as `create`, so
+      // stage 4 skips it and it stays empty on the wiki.
+      "preLaunchTask": "pnp: refresh before upload",
+      "program": "${workspaceFolder}/04_upload.py",
+      "args": [
+        "--apply"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "FANDOM_DRY_RUN": "0",
+        "FANDOM_EDIT_DELAY_S": "3"
+      },
+      "python": "${workspaceFolder}/fandom_env/Scripts/python.exe",
+      "justMyCode": false
+    }
+  ]
+}
