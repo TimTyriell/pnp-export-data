@@ -1,0 +1,2 @@
+# Test dependencies (see test_*.py). Runtime deps are in requirements.txt.
+pytest>=8.0

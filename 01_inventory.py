@@ -2,8 +2,8 @@
 
 Lists every page title (and later: categories, extracted entities) via the
 MediaWiki API and writes a snapshot to config.WIKI_CACHE_DIR. Downstream stages
-feed this index to the LLM so it can emit correct [[Page]] cross-references and
-decide create-vs-update. Idempotent: re-run any time to refresh the snapshot.
+use this index to emit correct [[Page]] cross-references and to decide
+create-vs-update. Idempotent: re-run any time to refresh the snapshot.
 
 Run:  python 01_inventory.py
 """
