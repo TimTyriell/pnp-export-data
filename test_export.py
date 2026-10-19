@@ -971,6 +971,14 @@ def test_session_citation_guard_ignores_empty_and_session_only_lists():
     extract.check_session_citations([{"concept": "sessions/x", "type": "Session", "sessions": 0}])
 
 
+def test_wiki_client_refuses_the_placeholder_url(monkeypatch):
+    from wiki_client import WikiClient
+
+    monkeypatch.setattr(config, "WIKI_API_URL", "https://DEINWIKI.fandom.com/api.php")
+    with pytest.raises(SystemExit, match="Set WIKI_API_URL in .env"):
+        WikiClient()
+
+
 # --- E2: safe upload ---------------------------------------------------------
 
 _BASE_TS = "2026-08-10T20:27:11Z"
