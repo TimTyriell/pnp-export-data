@@ -76,6 +76,26 @@ def ki_edits(client: WikiClient) -> dict[str, str]:
     return latest
 
 
+def _records(path: str) -> list[dict]:
+    """Every parsable record of one run log.
+
+    A killed run leaves a half-written last line; skip it rather than let one
+    bad line crash the whole report.
+    """
+
+    out = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
 def run_logs_newest_first() -> list[str]:
     """Run logs by mtime, newest first — a custom PNP_RUN_ID ("agent-foo")
     makes the filename useless for ordering."""
@@ -98,13 +118,11 @@ def latest_anomalies() -> dict[str, list[str]]:
     for path in run_logs_newest_first():
         found: dict[str, list[str]] = {}
         is_generate_run = False
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                rec = json.loads(line)
-                if rec.get("stage") == "03_generate":
-                    is_generate_run = True
-                if rec.get("event") == "anomaly" and rec.get("title"):
-                    found.setdefault(rec["title"], []).append(rec["kind"])
+        for rec in _records(path):
+            if rec.get("stage") == "03_generate":
+                is_generate_run = True
+            if rec.get("event") == "anomaly" and rec.get("title"):
+                found.setdefault(rec["title"], []).append(rec["kind"])
         if is_generate_run:
             return found
     return {}
@@ -151,11 +169,11 @@ def collect(client: WikiClient) -> list[dict]:
     types = entity_types()
     anomalies = latest_anomalies()
     revisions = client.last_revisions(sorted(edits))
+    wikitext = client.read_many(sorted(edits))
 
     rows: list[dict] = []
     for title, ki_ts in edits.items():
-        page = client.read(title)
-        text = page.wikitext if page else ""
+        text = wikitext.get(title, "")  # absent from the result = page missing
         state, region = ki_region_state(text)
         rev = revisions.get(title, {})
         rows.append(
@@ -293,38 +311,81 @@ def write_reports(rows: list[dict]) -> list[str]:
     return written
 
 
-def _last_run_counts() -> dict | None:
-    """Fold the newest run log's stage_end events into a summary, or None."""
+def _stage_summary(path: str, records: list[dict], end: dict) -> dict:
+    """The fields of one ``stage_end`` event, plus where its run log sits."""
 
-    log_files = run_logs_newest_first()
-    if not log_files:
-        return None
-    latest = log_files[0]
-    records = []
-    with open(latest, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                records.append(json.loads(line))
-    if not records:
-        return None
-    timestamps = sorted(r["ts"] for r in records if "ts" in r)
-    ends = [r for r in records if r.get("event") == "stage_end"]
-    ok = not any(r.get("level") == "error" for r in records)
-    counts = {"uploaded": 0, "skipped_new": 0, "failed": 0, "dry_run": None}
-    for r in ends:
-        for key in ("uploaded", "skipped_new", "failed"):
-            if key in r:
-                counts[key] = r[key]
-        if "dry_run" in r:
-            counts["dry_run"] = r["dry_run"]
+    meta = ("ts", "run_id", "stage", "event", "level")
+    stamps = sorted(r["ts"] for r in records if "ts" in r)
     return {
-        "run_id": Path(latest).stem,
-        "started_at": timestamps[0] if timestamps else None,
-        "ended_at": timestamps[-1] if timestamps else None,
-        "ok": ok,
-        "error": None,
-        "counts": counts,
+        **{k: v for k, v in end.items() if k not in meta},
+        "run_id": Path(path).stem,
+        "ts": end.get("ts"),
+        "started_at": stamps[0] if stamps else None,
+        "ended_at": stamps[-1] if stamps else None,
+    }
+
+
+def _last_pipeline_counts() -> dict | None:
+    """Summaries of the newest 04_upload and 03_generate runs, or None.
+
+    Stage 5 writes its own run log, so logs that contain only 05_report
+    records are skipped: the report must describe the run that uploaded, not
+    the run that read the result back.
+    """
+
+    found: dict[str, tuple[str, list[dict], dict]] = {}
+    for path in run_logs_newest_first():
+        records = _records(path)
+        if not records or all(r.get("stage") == _STAGE for r in records):
+            continue
+        for stage in ("04_upload", "03_generate"):
+            if stage in found:
+                continue
+            end = next(
+                (r for r in records if r.get("stage") == stage and r.get("event") == "stage_end"),
+                None,
+            )
+            if end is not None:
+                found[stage] = (path, records, end)
+        if len(found) == 2:
+            break
+    if not found:
+        return None
+
+    # ok/error come from the runs found above, not from stage 5's own log.
+    failures = [
+        r for _, records, _ in found.values() for r in records if r.get("level") == "error"
+    ]
+    upload = found.get("04_upload")
+    generate = found.get("03_generate")
+    return {
+        "upload": _stage_summary(*upload) if upload else None,
+        "generate": _stage_summary(*generate) if generate else None,
+        "ok": not failures,
+        "error": str(failures[0].get("detail") or failures[0].get("event")) if failures else None,
+    }
+
+
+def _last_run(pipeline: dict | None) -> dict | None:
+    """The status envelope's ``last_run``, from the pipeline's last upload."""
+
+    if pipeline is None:
+        return None
+    up = pipeline["upload"] or {}
+    return {
+        "run_id": up.get("run_id"),
+        "started_at": up.get("started_at"),
+        "ended_at": up.get("ended_at"),
+        "ok": pipeline["ok"],
+        "error": pipeline["error"],
+        "counts": {
+            "uploaded": up.get("uploaded", 0),
+            "skipped_new": up.get("skipped_new", 0),
+            "failed": up.get("failed", 0),
+            "dry_run": up.get("dry_run"),
+        },
+        # Additive: the generate run's summary, so the dashboard can show warnings.
+        "generate": pipeline["generate"],
     }
 
 
@@ -365,7 +426,7 @@ def write_status(rows: list[dict]) -> dict:
         "schema": 1,
         "service": "pnp-export-data",
         "generated_at": now,
-        "last_run": _last_run_counts(),
+        "last_run": _last_run(_last_pipeline_counts()),
         # Without the page bodies — the dashboard lists pages, it does not
         # render them, and they are ~300 KB.
         "items": [{k: v for k, v in r.items() if k != "page_text"} for r in rows],
