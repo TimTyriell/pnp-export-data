@@ -142,6 +142,23 @@ def test_plan_skips_duplicate_titles():
     assert sum(1 for e in plan if e["title"] == "Die Hexe") == 1
 
 
+def test_stage2_counts_grouped_gated_and_excluded_apart():
+    """Folded-into-a-page concepts are not 'skipped': the three drops differ."""
+
+    lowly = {"concept": "npcs/zwerg", "id": "NPC_ZWERG", "type": "NPC",
+             "title": "Zwerg", "aliases": [], "sessions": 0}
+    excluded = {"concept": "events/beschwoerung_von_slix", "id": "EVENT_SLIX",
+                "type": "Event", "title": "Beschwörung", "aliases": [], "sessions": 5}
+    concepts = [_BELORUS, _ARMEE, *_CONCEPTS, lowly, excluded]
+    events: list[dict] = []
+    extract.plan_entities(concepts, [], events=events, page_map=_MAP)
+    assert extract.drop_counts(concepts, _MAP, events) == {
+        "grouped": 1,  # the sub folded into Belorus's page
+        "gated": 1,  # Zwerg, below MIN_SESSIONS
+        "excluded": 1,  # the explicit exclude
+    }
+
+
 # --- stage 3: proposals ------------------------------------------------------
 
 

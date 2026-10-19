@@ -224,6 +224,25 @@ def plan_entities(
     return plan
 
 
+def drop_counts(concepts: list[dict], page_map: dict, events: list[dict]) -> dict:
+    """Why concepts did not become their own plan entry, in three numbers.
+
+    ``grouped`` are folded into another page (the map's subs and equal-weight
+    leads); ``gated`` and ``excluded`` are the two drops that really lose a
+    concept. Derived from the same inputs and the skip events plan_entities
+    wrote, so the log cannot disagree with the plan.
+    """
+
+    units = pagemap.group(concepts, page_map) if page_map else concepts
+    grouped = sum(len(pagemap.members_of(u)) - 1 for u in units)
+    reasons = [e.get("reason") for e in events if e.get("event") == "skip"]
+    return {
+        "grouped": grouped,
+        "gated": reasons.count("min_sessions"),
+        "excluded": reasons.count("pagemap_exclude"),
+    }
+
+
 def main() -> None:
     runlog.log(_STAGE, "stage_start", kb_url=config.KB_URL)
     page_titles = load_page_index()
@@ -247,6 +266,7 @@ def main() -> None:
 
     events: list[dict] = []
     plan = plan_entities(concepts, page_titles, events=events, page_map=page_map)
+    counts = drop_counts(concepts, page_map, events)
     for e in events:
         runlog.log(_STAGE, e.pop("event"), level=e.pop("level", "info"), **e)
 
@@ -272,14 +292,17 @@ def main() -> None:
     )
     runlog.log(_STAGE, "write", name=bodies_path.name, concepts=len(planned))
     creates = sum(1 for e in plan if e["action"] == "create")
-    skipped = len(concepts) - len(plan)
+    # Kept for compatibility: the two drops that lose a concept. Grouped
+    # concepts live on in their page and are not skipped.
+    skipped = counts["gated"] + counts["excluded"]
     runlog.log(
         _STAGE, "stage_end", entities=len(plan), create=creates,
         update=len(plan) - creates, skipped=skipped,
+        grouped=counts["grouped"], gated=counts["gated"], excluded=counts["excluded"],
         echo=(
             f"Wrote {len(plan)} entities to {out} "
             f"({creates} create, {len(plan) - creates} update, "
-            f"{skipped} skipped — see the run log for each skip reason; "
+            f"{counts['grouped']} grouped, {skipped} skipped — see the run log for each skip reason; "
             f"most are below the relevance gate of {config.MIN_SESSIONS} "
             "sessions, see CHRONIST.md §5)."
         ),
