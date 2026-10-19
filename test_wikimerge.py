@@ -208,6 +208,30 @@ def test_human_edit_inside_the_region_is_never_overwritten():
     assert "Begraben in Ehrenfels." in decisions["harvest"]
 
 
+def test_orphan_ki_start_marker_is_hands_off():
+    """A start marker without its end must not get a second region beside it."""
+
+    synced = merge_wikitext(_HAND, _KB_V2, "Nox")
+    broken = "\n".join(line for line in synced.splitlines() if "/KI-Abschnitt" not in line)
+    assert "KI-Abschnitt" in broken
+
+    out, decisions = merge_wikitext_verbose(broken, _KB_V2, "Nox")
+    assert out == broken
+    assert decisions["ki_state"] == "edited"
+    assert decisions["ki_marker_problem"] == "ki_marker_broken"
+    assert decisions["harvest"] is None  # no region text to hand over
+
+
+def test_two_ki_regions_are_hands_off():
+    synced = merge_wikitext(_HAND, _KB_V2, "Nox")
+    doubled = synced + "\n" + synced
+
+    out, decisions = merge_wikitext_verbose(doubled, _KB_V2, "Nox")
+    assert out == doubled
+    assert decisions["ki_state"] == "edited"
+    assert decisions["ki_marker_problem"] == "ki_region_duplicated"
+
+
 def test_empty_hand_heading_the_kb_fills_is_dropped():
     """It left the label stranded under a heading with nothing beneath it."""
 

@@ -59,6 +59,9 @@ def detect_anomalies(title: str, decisions: dict, wikitext: str) -> list[dict]:
     """
 
     found: list[dict] = []
+    # The merge hands a page off when its KI markers are malformed; say so here.
+    if decisions.get("ki_marker_problem"):
+        found.append({"kind": decisions["ki_marker_problem"]})
     # The set the merge actually matches against (any level), not just the
     # level-2 headings sections are carved from.
     live_headings = decisions.get("live_headings_all") or decisions["live_headings"]

@@ -971,6 +971,19 @@ def test_session_citation_guard_ignores_empty_and_session_only_lists():
     extract.check_session_citations([{"concept": "sessions/x", "type": "Session", "sessions": 0}])
 
 
+def test_broken_ki_marker_is_logged_as_an_anomaly():
+    """The merge's hands-off decision reaches the run log through detect_anomalies."""
+
+    plan = extract.plan_entities(_CONCEPTS, ["Die Hexe"])
+    bodies = {"npcs/hexe": "# Die Hexe\n\nNeu."}
+    live = {"Die Hexe": "== Überblick ==\n\n<!-- KI-Abschnitt: test sha=deadbeef -->\nText\n"}
+    events: list[dict] = []
+    generate.generate_proposals(plan, bodies, live, events=events)
+
+    kinds = [e.get("kind") for e in events if e["event"] == "anomaly"]
+    assert "ki_marker_broken" in kinds
+
+
 def test_wiki_client_refuses_the_placeholder_url(monkeypatch):
     from wiki_client import WikiClient
 
