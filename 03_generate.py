@@ -162,6 +162,11 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ascii_only).strip("-")
 
 
+def _cell(text: str) -> str:
+    """Text safe inside a wikitable cell: no pipes, no line breaks."""
+    return " ".join((text or "").split()).replace("|", "&#124;")
+
+
 def render_story_overview(plan: list[dict]) -> str:
     """The episode overview table as Wikitext.
 
@@ -207,7 +212,7 @@ def render_story_overview(plan: list[dict]) -> str:
         # cannot carry the <svg> icon Fandom's own chrome uses. Without that
         # CSS the toggle still works, it just has no arrow.
         lines += [
-            f'== <span class="pnp-klapp mw-customtoggle-{slug}">{label}</span> ==',
+            f'== <span class="pnp-klapp mw-customtoggle-{slug}">{_cell(label)}</span> ==',
             "",
             f'<div class="mw-collapsible{collapsed}" id="mw-customcollapsible-{slug}">',
             '<div class="mw-collapsible-content">',
@@ -220,7 +225,7 @@ def render_story_overview(plan: list[dict]) -> str:
         ]
         for entry in entries:
             ep = entry["episode"]
-            name = (ep.get("episode_title") or "").strip()
+            name = _cell(ep.get("episode_title"))
             # The page exists either way; without an Abenteuername the id is
             # the only label there is.
             link = (
@@ -232,8 +237,8 @@ def render_story_overview(plan: list[dict]) -> str:
                 "|-",
                 f"|{ep['episode']}",
                 f"|{link}",
-                f"|{(ep.get('description') or '').strip()}",
-                f"|{ep.get('resource') or ''}",
+                f"|{_cell(ep.get('description'))}",
+                f"|{_cell(ep.get('resource'))}",
             ]
         lines += ["|}", "</div>", "</div>", ""]
     return "\n".join(lines)

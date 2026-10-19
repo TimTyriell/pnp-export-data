@@ -696,6 +696,21 @@ def test_overview_falls_back_to_the_id_without_an_abenteuername():
     assert "|[[Folge S1-02-B]]" in out
 
 
+def test_overview_cells_survive_pipes_and_line_breaks():
+    """A '|' or a newline in KB text must not split the table row."""
+
+    plan = [
+        _session("P-01", "P", "Prolog | Nacht", "Session | Zero", "2025-03-26T00:00:00Z",
+                 "a | b\nc", wiki_title="Folge P-01 – Session Zero"),
+    ]
+    out = generate.render_story_overview(plan)
+    assert "|a &#124; b c" in out
+    assert "\nc\n" not in out
+    assert "a | b" not in out
+    assert ">Prolog &#124; Nacht<" in out
+    assert "|[[Folge P-01 – Session Zero|Session &#124; Zero]]" in out
+
+
 def test_overview_empty_without_sessions():
     assert generate.render_story_overview([{"concept": "npcs/x", "type": "NPC"}]) == ""
 
