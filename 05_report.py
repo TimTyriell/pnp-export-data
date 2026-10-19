@@ -37,11 +37,6 @@ from wikimerge import KI_LABEL, ki_region_state
 
 _STAGE = "05_report"
 
-# Every edit this pipeline makes carries this summary (see 04_upload.py), which
-# is what separates the bot's edits from the human edits of the same account —
-# a bot password logs in as the owning user, not as a separate one.
-EDIT_SUMMARY = "pnp-fandom-service update"
-
 _STATE_LABEL = {
     "clean": "unverändert",
     "edited": "vom Team überarbeitet",
@@ -71,7 +66,9 @@ def ki_edits(client: WikiClient) -> dict[str, str]:
     user = config.WIKI_USERNAME.split("@", 1)[0]  # bot password -> owning user
     latest: dict[str, str] = {}
     for edit in client.user_contributions(user):
-        if edit.get("comment") != EDIT_SUMMARY:
+        # The summary separates the bot's edits from human edits of the same
+        # account (a bot password logs in as the owning user).
+        if edit.get("comment") != config.EDIT_SUMMARY:
             continue
         ts = edit["timestamp"]
         if ts > latest.get(edit["title"], ""):

@@ -38,6 +38,14 @@ WIKI_USER_AGENT = os.environ.get(
     "WIKI_USER_AGENT", "pnp-fandom-service/0.1 (contact: noahstreppel@gmail.com)"
 )
 
+# Every edit this pipeline makes carries this summary; 05_report.py separates
+# the bot's edits from human edits of the same account by it. One constant so
+# the two stages cannot drift.
+EDIT_SUMMARY = "pnp-fandom-service update"
+
+# Seconds before a wiki request is abandoned (see WikiClient._request).
+HTTP_TIMEOUT_S = float(os.environ.get("FANDOM_HTTP_TIMEOUT_S", "30"))
+
 # Namespace to write generated pages into during review (0 = main/live,
 # 2 = User:, "Draft" if your wiki has a Draft namespace). The review-gate
 # workflow promotes from a draft/sandbox namespace to live only after approval.
