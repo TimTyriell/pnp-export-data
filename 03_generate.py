@@ -461,7 +461,7 @@ def generate_proposals(
         for e in sorted(new_pages, key=lambda e: e["wiki_title"]):
             lines.append(
                 f"* **{e['wiki_title']}** ({e['type']}, `{e['concept']}`)"
-                f" — Vorschlag: `{e['wiki_title'].replace('/', '_')}.wikitext`"
+                f" — Vorschlag: `{proposal_filename(e['wiki_title'])}.wikitext`"
             )
         outputs["NEW_PAGES.md"] = "\n".join(lines) + "\n"
 

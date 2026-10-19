@@ -176,6 +176,22 @@ def test_generate_proposals_writes_wikitext_diff_and_new_pages():
     assert "Lindo Laut" in outputs["NEW_PAGES.md"]
 
 
+def test_new_pages_names_the_proposal_like_every_other_path():
+    """NEW_PAGES.md must name the same file stage 3 writes, even for a title
+    with characters that are illegal in file names."""
+
+    plan = extract.plan_entities(_CONCEPTS, ["Die Hexe"])
+    lindo = next(e for e in plan if e["concept"] == "characters/lindo_laut")
+    lindo["wiki_title"] = "Lindo? Laut"
+    bodies = {"characters/lindo_laut": "# Überblick\n\nBarde."}
+    outputs = generate.generate_proposals(plan, bodies, {})
+
+    stem = generate.proposal_filename("Lindo? Laut")
+    assert f"{stem}.wikitext" in outputs
+    assert f"`{stem}.wikitext`" in outputs["NEW_PAGES.md"]
+    assert "Lindo? Laut.wikitext" not in outputs["NEW_PAGES.md"]
+
+
 def test_generate_proposals_skips_an_update_without_a_live_copy():
     """An update page we could not read gets no proposal at all — the raw KB
     text would replace the live page on upload."""
