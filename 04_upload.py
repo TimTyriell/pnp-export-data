@@ -131,9 +131,12 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
             continue
         # An empty .diff means the merge produced the live page verbatim — the
         # edit would come back as "nochange" after a full round trip plus
-        # EDIT_DELAY_S. Skip it. A *missing* .diff is not proof of anything
-        # (older run, hand-dropped file), so that still uploads.
+        # EDIT_DELAY_S. Skip it. Stage 3 writes a .diff for every update, so a
+        # *missing* one is suspect (hand-dropped, or stale) — skip it too.
         diff_path = path.with_suffix(".diff")
+        if title in updates and not diff_path.exists():
+            runlog.log(_STAGE, "skip", level="warn", title=title, reason="no_diff")
+            continue
         if diff_path.exists() and not diff_path.read_text(encoding="utf-8").strip():
             unchanged += 1
             runlog.log(_STAGE, "skip", title=title, reason="unchanged")
