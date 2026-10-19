@@ -73,7 +73,7 @@ def test_collect_reads_pages_in_one_batch(logs, monkeypatch):
         def user_contributions(self, user):
             return [
                 {"title": t, "timestamp": "2026-08-09T16:00:00Z",
-                 "comment": report.EDIT_SUMMARY}
+                 "comment": "pnp-fandom-service update"}
                 for t in ("Alpha", "Beta", "Gamma")
             ]
 
