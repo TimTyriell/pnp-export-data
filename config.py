@@ -132,8 +132,8 @@ LANGUAGE = "de"
 
 ROOT = Path(__file__).resolve().parent
 
-# LLM-generated session reports, the input to this service. Produced upstream by
-# pnp-crawl's (planned) stage-4 report generator. Drop the .md/.json files here.
+# Output of stage 5: the ki_pages.{md,csv,html,json} overview of every KI-edited
+# wiki page. Not an input — the input is the KB API above. Gitignored.
 REPORTS_DIR = ROOT / "reports"
 
 # Cached snapshot of the wiki: page index, categories, extracted entities.

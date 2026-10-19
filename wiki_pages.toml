@@ -32,12 +32,13 @@ sub = ["factions/belorus_untotenarmee"]
 # fuer sich ein Artikel wert, zusammen sind sie einer der wichtigsten
 # Kampagnenstraenge. Alle gleichwertig, also alle lead.
 # Vhar'Zul selbst behaelt seine eigene Seite — er ist der Gott, nicht ein
-# Fragment. Sythraal (der Schleier) fehlt: dazu gibt es kein KB-Konzept.
+# Fragment. Sythraal (der Schleier) und Ezhura (die Glut) fehlen: dazu gibt es
+# kein KB-Konzept (2026-09-05: "deities/ezhura" bestaetigt entfernt, siehe
+# ../pnp-knowledge/docs/audits/2026-09-05-v6-identity-cleanup-handoff.md).
 [pages."Die fünf Seelen Vhar'Zuls"]
 lead = [
     "deities/kollmereth",
     "deities/thyrex",
-    "deities/ezhura",
     "npcs/slix_vasul",
 ]
 aliases = ["Die fünf Seelenfragmente", "Seelenfragmente Vhar'Zuls"]

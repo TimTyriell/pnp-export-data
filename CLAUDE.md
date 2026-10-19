@@ -20,9 +20,9 @@ example data, prompts, and generated Wikitext in German, not English.
 
 ## Architecture
 
-A 4-stage CLI pipeline, scripts numbered `01`–`04` to match stage order. Each
+A 5-stage CLI pipeline, scripts numbered `01`–`05` to match stage order. Each
 stage reads the previous stage's output directory and is idempotent — re-running
-after adding new reports is safe.
+after a KB change is safe.
 
 ```
 01_inventory.py  Wiki → page index in wiki_cache/          (what already exists)
@@ -34,6 +34,10 @@ after adding new reports is safe.
                                                             .diff for updates,
                                                             NEW_PAGES.md list)
 04_upload.py     reviewed proposals/ → wiki                 (gated; see below)
+05_report.py     wiki contributions + logs → reports/       (read-only overview
+                 ki_pages.{md,csv,html,json}                 of every KI-edited
+                                                             page; report_html.py
+                                                             renders the HTML)
 ```
 
 There is **no LLM anywhere in this pipeline**, so a re-run costs no tokens —
@@ -90,7 +94,7 @@ dissolves the nesting and leaves four articles glued end to end. If a merged
 page ever reads as a flat run of sections again, that flag is where to look.
 
 - **[config.py](config.py)** is the single source of truth for all tunables
-  (wiki URL, bot creds via env, Ollama host/model, directories, `DRY_RUN`).
+  (wiki URL, bot creds via env, `MIN_SESSIONS`, directories, `DRY_RUN`).
   Scripts import from it directly; there are no CLI flags for these values.
   When asked to change behaviour, edit `config.py`, not the stage scripts —
   unless the change is structural. This mirrors pnp-crawl's convention.
@@ -98,10 +102,9 @@ page ever reads as a flat run of sections again, that flag is where to look.
   bot login (two-step token dance), `all_pages`, `read`, and `edit`. **`edit()`
   honours `config.DRY_RUN`** — when set it returns the would-be payload instead
   of POSTing, so generation/review can run without touching live content.
-- Stage 1 builds the **page index** that later stages feed to the LLM so it can
-  emit valid `[[Page]]` links and decide create-vs-update. This index is the
-  mechanism that makes cross-references resolve — keep it fresh before
-  generating.
+- Stage 1 builds the **page index** that later stages use to emit valid
+  `[[Page]]` links and to decide create-vs-update. This index is the mechanism
+  that makes cross-references resolve — keep it fresh before generating.
 
 ## Logging & debugging (read this before touching output)
 
@@ -176,19 +179,23 @@ Do not weaken or bypass this gate (e.g. defaulting `DRY_RUN` to False, hardcodin
 
 ## Status
 
-All four stages implemented. Stage 2 writes `wiki_cache/entities.json` with
+All five stages implemented. Stage 2 writes `wiki_cache/entities.json` with
 per-entity `action: create|update` (title/alias match against the page
 index); stage 3 writes `proposals/<Title>.wikitext` (+ `.diff` for updates,
-`NEW_PAGES.md` for creates). Offline tests: `python -m pytest`
-([test_export.py](test_export.py) — converter, planning, proposal cores; no
-network/wiki needed). The wiki itself is not yet configured
+`NEW_PAGES.md` for creates); stage 5 writes the `reports/ki_pages.*` overview.
+Offline tests: `python -m pytest` — 67 tests, no network/wiki/KB needed
+([test_export.py](test_export.py) converter/planning/proposal cores,
+[test_wikimerge.py](test_wikimerge.py) the additive merge and KI-region state,
+[test_runlog.py](test_runlog.py) the run log and anomaly detectors). Run them
+before and after any change. The wiki itself is not yet configured
 (`WIKI_API_URL` placeholder) — stage 1/DIFFS need a real wiki.
 
 ## Conventions & setup
 
-- **Python**, no LLM in the pipeline (deterministic conversion; the Ollama
-  settings in config are kept only for a possible future prose-polish pass —
-  don't add an OpenAI/Anthropic dependency unless asked).
+- **Python 3.11** (`.python-version`), no LLM in the pipeline (deterministic
+  conversion; the unused `OLLAMA_*` values in config are vestigial, kept only
+  for a possible future prose-polish pass — don't add an OpenAI/Anthropic
+  dependency unless asked).
 - Secrets (bot password, wiki URL) come from `.env` via `python-dotenv`
   (optional, falls back to shell env), same pattern as pnp-crawl. Never hardcode
   them into `config.py`. `.env.example` documents the keys.
@@ -197,8 +204,11 @@ network/wiki needed). The wiki itself is not yet configured
 - No system Python is on PATH in this environment (the sibling pnp-crawl
   installs into a venv). Set up a venv (`fandom_env/`, gitignored) per the
   README before running anything.
-- No test suite yet. Validate API/generation changes by running the relevant
-  stage with `DRY_RUN` on and inspecting `wiki_cache/` / `proposals/` output —
-  never test write paths against the live wiki.
+- Tests: `python -m pytest` (`pip install -r requirements-dev.txt`), run in CI
+  on every push (`.github/workflows/ci.yml`). They are fully offline, so add a
+  case there rather than reaching for the network. Behaviour the tests can't
+  reach (live API/generation) is validated by running the relevant stage with
+  `DRY_RUN` on and inspecting `wiki_cache/` / `proposals/` output — never test
+  write paths against the live wiki.
 - Be courteous to the Fandom API: a contact `User-Agent` is set in config and
   required by their policy; respect rate limits when adding bulk operations.
