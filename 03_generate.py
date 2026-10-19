@@ -136,7 +136,11 @@ def prune_proposals(keep: set[str]) -> int:
     for path in sorted(config.PROPOSALS_DIR.iterdir()):
         if not path.is_file() or path.name in keep:
             continue
-        if path.suffix not in _OURS and path.name != "NEW_PAGES.md":
+        if (
+            path.suffix not in _OURS
+            and path.name != "NEW_PAGES.md"
+            and not path.name.endswith(".base.json")  # stage 4 sidecar, see generate_proposals
+        ):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         runlog.log(
@@ -235,8 +239,23 @@ def render_story_overview(plan: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def base_sidecar(title: str, live: str, live_rev: str) -> str:
+    """The stage-4 guard for an update: the live revision this proposal merged
+    against. Stage 4 sends it as basetimestamp, so a human edit made since
+    stage 3 is a conflict instead of a silent overwrite."""
+
+    return json.dumps(
+        {"title": title, "basetimestamp": live_rev, "live_sha8": runlog.sha8(live)},
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
+
+
 def build_overview_proposal(
-    plan: list[dict], live_pages: dict[str, str], events: list[dict] | None = None
+    plan: list[dict],
+    live_pages: dict[str, str],
+    events: list[dict] | None = None,
+    live_revs: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """``{filename: content}`` for the episode overview page, or ``{}``.
 
@@ -279,7 +298,10 @@ def build_overview_proposal(
             lineterm="",
         )
     )
-    return {f"{safe}.wikitext": merged, f"{safe}.diff": diff + "\n"}
+    out = {f"{safe}.wikitext": merged, f"{safe}.diff": diff + "\n"}
+    if live_revs is not None and title in live_revs:
+        out[f"{safe}.base.json"] = base_sidecar(title, live, live_revs[title])
+    return out
 
 
 def load_plan() -> list[dict]:
@@ -314,11 +336,14 @@ def generate_proposals(
     bodies: dict[str, str],
     live_pages: dict[str, str],
     events: list[dict] | None = None,
+    live_revs: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Pure core (offline-testable): return ``filename -> content``.
 
     ``events`` (optional) collects per-page merge decisions and anomalies for
     the caller to write to the run log — the core itself stays I/O-free.
+    ``live_revs`` maps each live title to its revision timestamp; every update
+    then gets a ``<stem>.base.json`` sidecar (see base_sidecar).
     """
 
     resolver = LinkResolver(
@@ -401,6 +426,10 @@ def generate_proposals(
                 )
             )
             outputs[f"{safe_title}.diff"] = diff + "\n"
+            if live_revs is not None and entity["wiki_title"] in live_revs:
+                outputs[f"{safe_title}.base.json"] = base_sidecar(
+                    entity["wiki_title"], live, live_revs[entity["wiki_title"]]
+                )
         else:
             # A page the agent creates is born with its KI region. Without the
             # markers the *next* sync sees ki_state='absent' and has to guess,
@@ -460,6 +489,7 @@ def main() -> None:
                 raise SystemExit(f"KB API not reachable ({exc}).")
 
     live_pages: dict[str, str] = {}
+    live_revs: dict[str, str] = {}
     updates = [e for e in plan if e["action"] == "update"]
     if updates or config.STORY_OVERVIEW_PAGE:
         titles = [e["wiki_title"] for e in updates]
@@ -468,7 +498,9 @@ def main() -> None:
         if config.STORY_OVERVIEW_PAGE:
             titles.append(config.STORY_OVERVIEW_PAGE)
         try:
-            live_pages = WikiClient().read_many(titles)
+            with_revs = WikiClient().read_many_with_revs(titles)
+            live_pages = {t: text for t, (text, _ts) in with_revs.items()}
+            live_revs = {t: ts for t, (_text, ts) in with_revs.items()}
         except requests.RequestException as exc:
             # Fail closed: a partial proposal set is worse than none, because
             # stage 4 cannot tell which files are trustworthy.
@@ -481,8 +513,8 @@ def main() -> None:
             raise SystemExit(2) from exc
 
     events: list[dict] = []
-    outputs = generate_proposals(plan, bodies, live_pages, events)
-    outputs |= build_overview_proposal(plan, live_pages, events)
+    outputs = generate_proposals(plan, bodies, live_pages, events, live_revs)
+    outputs |= build_overview_proposal(plan, live_pages, events, live_revs)
 
     # Pages whose KI region a human edited: their text is knowledge the KB does
     # not have yet. Write it out for a human to move into

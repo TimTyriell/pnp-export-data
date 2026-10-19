@@ -10,6 +10,7 @@ Docs: https://www.mediawiki.org/wiki/API:Main_page
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import requests
@@ -138,12 +139,17 @@ class WikiClient:
         which callers must distinguish (membership, not truthiness).
         """
 
-        out: dict[str, str] = {}
+        return {t: text for t, (text, _ts) in self.read_many_with_revs(titles).items()}
+
+    def read_many_with_revs(self, titles: list[str]) -> dict[str, tuple[str, str]]:
+        """``title -> (wikitext, revision timestamp)`` for pages that exist (batches of 50)."""
+
+        out: dict[str, tuple[str, str]] = {}
         for i in range(0, len(titles), 50):  # API caps titles= at 50
             data = self._get(
                 action="query",
                 prop="revisions",
-                rvprop="content",
+                rvprop="content|timestamp",
                 rvslots="main",
                 titles="|".join(titles[i : i + 50]),
             )
@@ -151,15 +157,26 @@ class WikiClient:
                 if "missing" in page:
                     continue
                 revs = page.get("revisions")
-                out[page["title"]] = (
-                    revs[0]["slots"]["main"].get("*", "") if revs else ""
-                )
+                if revs:
+                    text = revs[0]["slots"]["main"].get("*", "")
+                    out[page["title"]] = (text, revs[0]["timestamp"])
+                else:
+                    out[page["title"]] = ("", "")
         return out
 
     # --- write ------------------------------------------------------------
 
-    def edit(self, title: str, text: str, summary: str) -> dict:
-        """Create or replace a page. No-op (returns payload) when DRY_RUN."""
+    def edit(self, title: str, text: str, summary: str, *,
+             basetimestamp: str | None = None, nocreate: bool = True,
+             createonly: bool = False) -> dict:
+        """Create or replace a page. No-op (returns payload) when DRY_RUN.
+
+        ``basetimestamp`` makes MediaWiki refuse the edit if the page changed
+        since that revision (editconflict); ``starttimestamp`` makes it refuse
+        if the page was deleted meanwhile. ``nocreate`` refuses to recreate a
+        missing page; ``createonly`` refuses to overwrite an existing one. The
+        two are never sent together.
+        """
         payload = {
             "action": "edit",
             "title": title,
@@ -168,6 +185,13 @@ class WikiClient:
             "bot": True,
             "format": "json",
         }
+        if createonly:
+            payload["createonly"] = 1
+        elif nocreate:
+            payload["nocreate"] = 1
+        if basetimestamp:
+            payload["basetimestamp"] = basetimestamp
+            payload["starttimestamp"] = basetimestamp
         if config.DRY_RUN:
             return {"dry_run": True, **payload}
         if not self._logged_in:
@@ -177,10 +201,24 @@ class WikiClient:
 
     # --- transport --------------------------------------------------------
 
-    def _get(self, **params) -> dict:
+    def _request(self, method: str, **params) -> dict:
         params["format"] = "json"
-        return self.session.get(self.url, params=params).json()
+        kw = {"params": params} if method == "GET" else {"data": params}
+        for attempt in range(3):
+            resp = self.session.request(method, self.url, timeout=config.HTTP_TIMEOUT_S, **kw)
+            if resp.status_code in (429, 502, 503, 504) and attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("error", {}).get("code") == "ratelimited" and attempt < 2:
+                time.sleep(5 * (attempt + 1))
+                continue
+            return data
+        return data
+
+    def _get(self, **params) -> dict:
+        return self._request("GET", **params)
 
     def _post(self, **params) -> dict:
-        params["format"] = "json"
-        return self.session.post(self.url, data=params).json()
+        return self._request("POST", **params)

@@ -35,6 +35,13 @@ from wiki_client import WikiClient
 
 _STAGE = "04_upload"
 
+# What a refused edit most likely means, printed next to the failure.
+_HINTS = {
+    "editconflict": "page changed since stage 3 — re-run 01→03 and review the new diff",
+    "missingtitle": "page was deleted on the wiki — not recreated",
+    "articleexists": "page exists now — re-run 01→03 so it is planned as an update",
+}
+
 
 def _load_plan() -> list[dict] | None:
     plan_path = config.WIKI_CACHE_DIR / "entities.json"
@@ -141,6 +148,20 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
             unchanged += 1
             runlog.log(_STAGE, "skip", title=title, reason="unchanged")
             continue
+        # The live revision stage 3 merged against. Without it the edit cannot
+        # detect a conflict, so an update never goes out blind.
+        # An empty or unreadable sidecar is the same as none: the edit would go
+        # out without basetimestamp.
+        base = None
+        if title in updates:
+            try:
+                sidecar = json.loads(path.with_suffix(".base.json").read_text(encoding="utf-8"))
+                base = sidecar["basetimestamp"] or None
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+            if base is None:
+                runlog.log(_STAGE, "skip", level="warn", title=title, reason="no_base")
+                continue
         text = path.read_text(encoding="utf-8")
         # sha8 + mtime tie this upload to the stage-3 `write` event that
         # produced the file — proposals/ keeps files from older runs.
@@ -153,24 +174,44 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
             ),
         }
         if do_apply:
-            result = client.edit(title, text, summary="pnp-fandom-service update")
+            if base is not None:
+                result = client.edit(
+                    title, text, config.EDIT_SUMMARY,
+                    basetimestamp=base, nocreate=True,
+                )
+            else:
+                result = client.edit(
+                    title, text, config.EDIT_SUMMARY, nocreate=False, createonly=True,
+                )
             # The API answers 200 with an {"error": ...} body for a refused
-            # edit (rate limit, protection, bad token). Reporting that as an
-            # upload loses edits silently, so inspect it.
+            # edit (conflict, rate limit, protection, bad token), and with
+            # edit.result "Failure" for a captcha or abuse filter. Neither is
+            # an upload.
+            edit = result.get("edit") or {}
             if "error" in result:
                 err = result["error"]
-                failures.append((title, err.get("info") or err.get("code", "?")))
+                code = err.get("code", "?")
+                info = err.get("info") or code
+            elif edit.get("result") != "Success":
+                code = edit.get("result", "?")
+                info = json.dumps(edit)[:300]
+            else:
+                code = None
+            if code is not None:
+                hint = _HINTS.get(code, "")
+                failures.append((title, info))
                 runlog.log(
                     _STAGE, "upload_failed", level="error", **meta,
-                    code=err.get("code", "?"), info=err.get("info", ""),
-                    echo=f"FAILED {title}: {err.get('code', '?')} — {err.get('info', '')}",
+                    code=code, info=info, hint=hint,
+                    echo=f"FAILED {title}: {code} — {info}" + (f"\n  -> {hint}" if hint else ""),
                 )
             else:
                 uploaded += 1
                 runlog.log(
                     _STAGE, "upload", **meta, dry_run=False,
-                    result=str(result.get("edit", result)),
-                    echo=f"Uploaded {title}: {result.get('edit', result)}",
+                    result=str(edit), newrevid=edit.get("newrevid"),
+                    nochange="nochange" in edit,
+                    echo=f"Uploaded {title}: {edit}",
                 )
             time.sleep(config.EDIT_DELAY_S)
         else:

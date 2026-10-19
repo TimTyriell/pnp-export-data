@@ -116,7 +116,7 @@ which file** (`write` events carry `name`, `bytes`, `sha8`) and of *why* a page
 came out the way it did.
 
 Stage 3 **prunes** `proposals/` at the end of each run: its own leftovers
-(`.wikitext`, `.diff`, `NEW_PAGES.md`) that this run did not write are deleted,
+(`.wikitext`, `.diff`, `.base.json`, `NEW_PAGES.md`) that this run did not write are deleted,
 with a `prune` event per file so the record outlives the file. Anything else in
 the directory is left alone — a `notizen.md` or a `.bak` is not this stage's to
 delete. Everything pruned is regenerable by re-running the stage, so review
@@ -177,6 +177,14 @@ This service writes to a live wiki, so writes are gated by design:
 
 Do not weaken or bypass this gate (e.g. defaulting `DRY_RUN` to False, hardcoding
 `--apply`, or POSTing directly) without the user explicitly asking.
+
+**Upload contract (stage 3 → stage 4):** stage 3 writes `<stem>.base.json`
+(`basetimestamp` = the live revision it merged against, `live_sha8`) beside every
+update proposal. Stage 4 sends that as `basetimestamp`/`starttimestamp` plus
+`nocreate=1`, so a human edit since stage 3 is an `editconflict` and a deleted
+page is not recreated. An update without a sidecar is skipped (`no_base`). Creates
+(`--create` only) send `createonly=1`, never overwrite. Only `edit.result == "Success"`
+without an `error` counts as uploaded. Re-run 01→03 after any failure.
 
 ## Status
 
