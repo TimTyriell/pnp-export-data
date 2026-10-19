@@ -26,6 +26,8 @@ class Page:
 
 class WikiClient:
     def __init__(self) -> None:
+        if "DEINWIKI" in config.WIKI_API_URL:
+            raise SystemExit("Set WIKI_API_URL in .env")
         self.session = requests.Session()
         self.session.headers["User-Agent"] = config.WIKI_USER_AGENT
         self.url = config.WIKI_API_URL

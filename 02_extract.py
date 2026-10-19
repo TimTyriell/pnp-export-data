@@ -55,6 +55,36 @@ def count_sessions(body_md: str) -> int:
     return len(set(_SESSION_CITE_RE.findall(body_md)))
 
 
+def concept_payload(resp_json: dict, concept: str) -> tuple[dict, str]:
+    """(frontmatter, body_md) from GET /concepts/{id}, or SystemExit naming the field.
+
+    The KB API is a separate service in a separate repo; a shape change there
+    should stop this pipeline with a message, not a KeyError three stages later.
+    """
+    fm = resp_json.get("frontmatter")
+    body = resp_json.get("body_md")
+    if not isinstance(fm, dict) or not isinstance(body, str):
+        raise SystemExit(f"KB API returned an unexpected shape for {concept}: keys={sorted(resp_json)}")
+    return fm, body
+
+
+def check_session_citations(concepts: list[dict]) -> None:
+    """Abort if no non-Session concept cites a session at all.
+
+    _SESSION_CITE_RE encodes the KB's citation format. If the KB changes it,
+    every concept reads as sessions=0 and the relevance gate silently drops the
+    whole plan. An empty list (or only Session concepts) is not evidence of a
+    format change, so it passes.
+    """
+    others = [c for c in concepts if c.get("type") != "Session"]
+    if others and not any(c.get("sessions", 0) >= 1 for c in others):
+        raise SystemExit(
+            f"No non-Session concept cites a session ({_SESSION_CITE_RE.pattern!r}). "
+            "The KB's citation format has probably changed, and every concept "
+            "would be gated out. Check the citations against _SESSION_CITE_RE."
+        )
+
+
 def load_page_index() -> list[str]:
     path = config.WIKI_CACHE_DIR / "page_index.json"
     if not path.exists():
@@ -102,10 +132,8 @@ def fetch_concepts() -> tuple[list[dict], dict[str, str]]:
                 f"{config.KB_URL}/concepts/{c['concept']}", timeout=30
             )
             detail.raise_for_status()
-            payload = detail.json()
-            fm = payload["frontmatter"]
+            fm, body = concept_payload(detail.json(), c["concept"])
             c["aliases"] = fm.get("aliases") or []
-            body = payload.get("body_md") or ""
             bodies[c["concept"]] = body
             c["sessions"] = count_sessions(body)
             # Episode identity for the overview table (stage 3). Copied field
@@ -224,6 +252,25 @@ def plan_entities(
     return plan
 
 
+def drop_counts(concepts: list[dict], page_map: dict, events: list[dict]) -> dict:
+    """Why concepts did not become their own plan entry, in three numbers.
+
+    ``grouped`` are folded into another page (the map's subs and equal-weight
+    leads); ``gated`` and ``excluded`` are the two drops that really lose a
+    concept. Derived from the same inputs and the skip events plan_entities
+    wrote, so the log cannot disagree with the plan.
+    """
+
+    units = pagemap.group(concepts, page_map) if page_map else concepts
+    grouped = sum(len(pagemap.members_of(u)) - 1 for u in units)
+    reasons = [e.get("reason") for e in events if e.get("event") == "skip"]
+    return {
+        "grouped": grouped,
+        "gated": reasons.count("min_sessions"),
+        "excluded": reasons.count("pagemap_exclude"),
+    }
+
+
 def main() -> None:
     runlog.log(_STAGE, "stage_start", kb_url=config.KB_URL)
     page_titles = load_page_index()
@@ -247,6 +294,8 @@ def main() -> None:
 
     events: list[dict] = []
     plan = plan_entities(concepts, page_titles, events=events, page_map=page_map)
+    check_session_citations(concepts)
+    counts = drop_counts(concepts, page_map, events)
     for e in events:
         runlog.log(_STAGE, e.pop("event"), level=e.pop("level", "info"), **e)
 
@@ -272,14 +321,17 @@ def main() -> None:
     )
     runlog.log(_STAGE, "write", name=bodies_path.name, concepts=len(planned))
     creates = sum(1 for e in plan if e["action"] == "create")
-    skipped = len(concepts) - len(plan)
+    # Kept for compatibility: the two drops that lose a concept. Grouped
+    # concepts live on in their page and are not skipped.
+    skipped = counts["gated"] + counts["excluded"]
     runlog.log(
         _STAGE, "stage_end", entities=len(plan), create=creates,
         update=len(plan) - creates, skipped=skipped,
+        grouped=counts["grouped"], gated=counts["gated"], excluded=counts["excluded"],
         echo=(
             f"Wrote {len(plan)} entities to {out} "
             f"({creates} create, {len(plan) - creates} update, "
-            f"{skipped} skipped — see the run log for each skip reason; "
+            f"{counts['grouped']} grouped, {skipped} skipped — see the run log for each skip reason; "
             f"most are below the relevance gate of {config.MIN_SESSIONS} "
             "sessions, see CHRONIST.md §5)."
         ),

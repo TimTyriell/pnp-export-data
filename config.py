@@ -35,7 +35,7 @@ WIKI_BOT_PASSWORD = os.environ.get("WIKI_BOT_PASSWORD", "")
 
 # Polite User-Agent is required by Fandom/Wikimedia API policy.
 WIKI_USER_AGENT = os.environ.get(
-    "WIKI_USER_AGENT", "pnp-fandom-service/0.1 (contact: noahstreppel@gmail.com)"
+    "WIKI_USER_AGENT", "pnp-fandom-service/0.1 (set WIKI_USER_AGENT in .env)"
 )
 
 # Every edit this pipeline makes carries this summary; 05_report.py separates

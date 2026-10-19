@@ -25,6 +25,7 @@ Run:  python 03_generate.py          (KB API up; wiki reachable for diffs)
 from __future__ import annotations
 
 import difflib
+import importlib
 import json
 import re
 import unicodedata
@@ -44,6 +45,9 @@ from wiki_client import WikiClient
 import wikimerge
 from wikimerge import _norm, _HEADING_RE, merge_wikitext_verbose
 
+# 02_extract starts with a digit, so it cannot be a plain import statement.
+extract = importlib.import_module("02_extract")
+
 _STAGE = "03_generate"
 
 
@@ -55,6 +59,9 @@ def detect_anomalies(title: str, decisions: dict, wikitext: str) -> list[dict]:
     """
 
     found: list[dict] = []
+    # The merge hands a page off when its KI markers are malformed; say so here.
+    if decisions.get("ki_marker_problem"):
+        found.append({"kind": decisions["ki_marker_problem"]})
     # The set the merge actually matches against (any level), not just the
     # level-2 headings sections are carved from.
     live_headings = decisions.get("live_headings_all") or decisions["live_headings"]
@@ -162,6 +169,11 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ascii_only).strip("-")
 
 
+def _cell(text: str) -> str:
+    """Text safe inside a wikitable cell: no pipes, no line breaks."""
+    return " ".join((text or "").split()).replace("|", "&#124;")
+
+
 def render_story_overview(plan: list[dict]) -> str:
     """The episode overview table as Wikitext.
 
@@ -207,7 +219,7 @@ def render_story_overview(plan: list[dict]) -> str:
         # cannot carry the <svg> icon Fandom's own chrome uses. Without that
         # CSS the toggle still works, it just has no arrow.
         lines += [
-            f'== <span class="pnp-klapp mw-customtoggle-{slug}">{label}</span> ==',
+            f'== <span class="pnp-klapp mw-customtoggle-{slug}">{_cell(label)}</span> ==',
             "",
             f'<div class="mw-collapsible{collapsed}" id="mw-customcollapsible-{slug}">',
             '<div class="mw-collapsible-content">',
@@ -220,7 +232,7 @@ def render_story_overview(plan: list[dict]) -> str:
         ]
         for entry in entries:
             ep = entry["episode"]
-            name = (ep.get("episode_title") or "").strip()
+            name = _cell(ep.get("episode_title"))
             # The page exists either way; without an Abenteuername the id is
             # the only label there is.
             link = (
@@ -232,8 +244,8 @@ def render_story_overview(plan: list[dict]) -> str:
                 "|-",
                 f"|{ep['episode']}",
                 f"|{link}",
-                f"|{(ep.get('description') or '').strip()}",
-                f"|{ep.get('resource') or ''}",
+                f"|{_cell(ep.get('description'))}",
+                f"|{_cell(ep.get('resource'))}",
             ]
         lines += ["|}", "</div>", "</div>", ""]
     return "\n".join(lines)
@@ -314,7 +326,7 @@ def load_plan() -> list[dict]:
 def fetch_body(session: requests.Session, concept: str) -> str:
     resp = session.get(f"{config.KB_URL}/concepts/{concept}", timeout=30)
     resp.raise_for_status()
-    return resp.json()["body_md"]
+    return extract.concept_payload(resp.json(), concept)[1]
 
 
 def cached_bodies() -> dict[str, str]:
@@ -456,7 +468,7 @@ def generate_proposals(
         for e in sorted(new_pages, key=lambda e: e["wiki_title"]):
             lines.append(
                 f"* **{e['wiki_title']}** ({e['type']}, `{e['concept']}`)"
-                f" — Vorschlag: `{e['wiki_title'].replace('/', '_')}.wikitext`"
+                f" — Vorschlag: `{proposal_filename(e['wiki_title'])}.wikitext`"
             )
         outputs["NEW_PAGES.md"] = "\n".join(lines) + "\n"
 

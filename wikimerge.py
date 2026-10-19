@@ -119,13 +119,31 @@ def split_ki_region(text: str) -> tuple[str, str, str, str] | None:
     )
 
 
+def ki_marker_problem(text: str) -> str | None:
+    """``ki_marker_broken`` / ``ki_region_duplicated`` if the markers are malformed.
+
+    A start marker without its end, or more than one start marker, means a
+    human has to repair the page: we cannot tell which text is the region.
+    """
+
+    starts = list(KI_START_RE.finditer(text))
+    if len(starts) > 1:
+        return "ki_region_duplicated"
+    if starts and not KI_END_RE.search(text, starts[0].end()):
+        return "ki_marker_broken"
+    return None
+
+
 def ki_region_state(live: str) -> tuple[str, str | None]:
     """``(state, region_body)`` — ``absent``, ``clean`` or ``edited``.
 
     ``edited`` means a human changed the region since we wrote it, so its text
-    is knowledge we do not have yet and must not overwrite.
+    is knowledge we do not have yet and must not overwrite. Malformed markers
+    are ``edited`` too, with no region text to harvest.
     """
 
+    if ki_marker_problem(live):
+        return "edited", None
     split = split_ki_region(live)
     if split is None:
         return "absent", None
@@ -246,6 +264,7 @@ def merge_wikitext_verbose(
         return live, {
             "live_bytes": len(live),
             "ki_state": "edited",
+            "ki_marker_problem": ki_marker_problem(live),
             "harvest": region_body,
             "live_headings": [],
             "live_headings_all": [],
