@@ -68,6 +68,37 @@ the failure mode this design refuses.
 Input is the read-only **KB API** of `pnp-knowledge` (`config.KB_URL`, default
 `http://127.0.0.1:8070`) — not local files.
 
+```mermaid
+flowchart TB
+    classDef stage fill:#0d47a1,stroke:#64b5f6,color:#fff
+    classDef merge fill:#1b5e20,stroke:#81c784,color:#fff
+    classDef gate fill:#e65100,stroke:#ffb74d,color:#fff
+    classDef never fill:#b71c1c,stroke:#ef9a9a,color:#fff
+
+    KB["pnp-knowledge API :8070<br/>GET only — synthesized, cited German markdown"]
+
+    KB --> S2
+    W1["01_inventory — wiki page index"]:::stage --> S2["02_extract — plan create|update<br/>wiki_pages.toml decides which entity is a page"]:::stage
+    S2 --> S3["03_generate — md2wiki + wikimerge<br/>proposals/*.wikitext + *.diff"]:::stage
+
+    S3 --> M{{"per page: does the live wiki<br/>already have this heading?"}}
+    M -->|"yes"| KEEP["skip the section — the human wording wins"]:::merge
+    M -->|"no"| ADD["append the KB section<br/>categories unioned, never replaced"]:::merge
+    HAND["hand-written prose, infoboxes, images"]:::never -.->|"never deleted, never rewritten"| ADD
+
+    KEEP --> REV{{"human reviews the .diff"}}:::gate
+    ADD --> REV
+    REV -->|"approved · FANDOM_DRY_RUN=0"| S4["04_upload — edit live pages"]:::stage
+    REV -->|"default: DRY_RUN=1"| NOOP["writes nothing"]:::gate
+    S4 --> S5["05_report — who wrote what, when<br/>read from the wiki itself"]:::stage
+
+    NEW["new pages are only *listed*<br/>proposals/NEW_PAGES.md"]:::gate
+    S3 --> NEW
+```
+
+**No LLM appears in this diagram, and that is the feature** — see decision 1
+above. Re-running any stage costs HTTP round trips and zero tokens.
+
 ```
 01_inventory.py  wiki → page index in wiki_cache/       what already exists
 02_extract.py    KB API + wiki_pages.toml vs. index     create|update plan
