@@ -905,6 +905,72 @@ def test_extract_refuses_a_kb_that_serves_an_empty_type(monkeypatch):
         extract.fetch_concepts()
 
 
+def test_concept_payload_names_the_missing_field():
+    fm, body = extract.concept_payload({"frontmatter": {"aliases": []}, "body_md": "# X"}, "npcs/x")
+    assert fm == {"aliases": []} and body == "# X"
+
+    with pytest.raises(SystemExit, match="unexpected shape for npcs/x"):
+        extract.concept_payload({"frontmatter": {}}, "npcs/x")  # body_md renamed away
+    with pytest.raises(SystemExit, match="unexpected shape for npcs/x"):
+        extract.concept_payload({"body_md": "# X"}, "npcs/x")  # frontmatter gone
+
+
+def test_fetch_concepts_stops_on_a_kb_without_body_md(monkeypatch):
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return [{"concept": "npcs/x", "type": "NPC"}]
+
+    class _Detail(_Resp):
+        def json(self): return {"frontmatter": {}}  # no body_md at all
+
+    class _Session:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url, **kw):
+            return _Resp() if url.endswith("/concepts") else _Detail()
+
+    monkeypatch.setattr(extract.requests, "Session", _Session)
+    monkeypatch.setattr(extract.config, "EXPORT_TYPES", ["NPC"])
+    with pytest.raises(SystemExit, match="unexpected shape for npcs/x"):
+        extract.fetch_concepts()
+
+
+def test_fetch_body_stops_on_a_kb_without_body_md():
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"frontmatter": {}}
+
+    class _Session:
+        def get(self, *a, **kw): return _Resp()
+
+    with pytest.raises(SystemExit, match="unexpected shape for npcs/x"):
+        generate.fetch_body(_Session(), "npcs/x")
+
+
+def test_session_citation_guard_fires_when_nothing_cites_a_session():
+    """A KB citation-format change must stop stage 2, not gate every concept out."""
+    concepts = [
+        {"concept": "npcs/hexe", "type": "NPC", "sessions": 0},
+        {"concept": "sessions/2026-07-29", "type": "Session", "sessions": 0},
+    ]
+    with pytest.raises(SystemExit, match="_SESSION_CITE_RE"):
+        extract.check_session_citations(concepts)
+
+
+def test_session_citation_guard_passes_with_one_citing_concept():
+    concepts = [
+        {"concept": "npcs/hexe", "type": "NPC", "sessions": 0},
+        {"concept": "npcs/belorus", "type": "NPC", "sessions": 1},
+    ]
+    extract.check_session_citations(concepts)  # no raise
+
+
+def test_session_citation_guard_ignores_empty_and_session_only_lists():
+    """Nothing to judge: no non-Session concept means no evidence of a format change."""
+    extract.check_session_citations([])
+    extract.check_session_citations([{"concept": "sessions/x", "type": "Session", "sessions": 0}])
+
+
 # --- E2: safe upload ---------------------------------------------------------
 
 _BASE_TS = "2026-08-10T20:27:11Z"

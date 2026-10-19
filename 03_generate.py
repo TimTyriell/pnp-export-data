@@ -25,6 +25,7 @@ Run:  python 03_generate.py          (KB API up; wiki reachable for diffs)
 from __future__ import annotations
 
 import difflib
+import importlib
 import json
 import re
 import unicodedata
@@ -43,6 +44,9 @@ from md2wiki import (
 from wiki_client import WikiClient
 import wikimerge
 from wikimerge import _norm, _HEADING_RE, merge_wikitext_verbose
+
+# 02_extract starts with a digit, so it cannot be a plain import statement.
+extract = importlib.import_module("02_extract")
 
 _STAGE = "03_generate"
 
@@ -319,7 +323,7 @@ def load_plan() -> list[dict]:
 def fetch_body(session: requests.Session, concept: str) -> str:
     resp = session.get(f"{config.KB_URL}/concepts/{concept}", timeout=30)
     resp.raise_for_status()
-    return resp.json()["body_md"]
+    return extract.concept_payload(resp.json(), concept)[1]
 
 
 def cached_bodies() -> dict[str, str]:
