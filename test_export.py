@@ -178,9 +178,9 @@ def test_generate_proposals_writes_wikitext_diff_and_new_pages():
     assert "[[Kategorie:NPCs]]" in hexe  # KB category unioned in
     # diff is additions-only: no line removed from the live page.
     removals = [
-        l
-        for l in outputs["Die Hexe.diff"].splitlines()
-        if l.startswith("-") and not l.startswith("---")
+        line
+        for line in outputs["Die Hexe.diff"].splitlines()
+        if line.startswith("-") and not line.startswith("---")
     ]
     assert removals == []
 

@@ -1,0 +1,8 @@
+target-version = "py311"
+# Mirrors ../pnp-knowledge/ruff.toml: same rule selection and 120-column lines.
+# Excludes: generated/cached data dirs and the local venv.
+line-length = 120
+exclude = [".git", ".venv", "__pycache__", "fandom_env", "proposals", "wiki_cache", "logs", "reports", "harvest", "status"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
