@@ -34,6 +34,7 @@ import requests
 import config
 import pagemap
 import runlog
+import wikimerge
 from md2wiki import (
     LinkResolver,
     markdown_to_wikitext,
@@ -41,8 +42,7 @@ from md2wiki import (
     strip_transcription_variants,
 )
 from wiki_client import WikiClient
-import wikimerge
-from wikimerge import _norm, _HEADING_RE, merge_wikitext_verbose
+from wikimerge import _HEADING_RE, _norm, merge_wikitext_verbose
 
 _STAGE = "03_generate"
 
@@ -462,7 +462,7 @@ def main() -> None:
                 runlog.log(
                     _STAGE, "error", level="error", concept=concept, detail=str(exc)
                 )
-                raise SystemExit(f"KB API not reachable ({exc}).")
+                raise SystemExit(f"KB API not reachable ({exc}).") from exc
 
     live_pages: dict[str, str] = {}
     updates = [e for e in plan if e["action"] == "update"]

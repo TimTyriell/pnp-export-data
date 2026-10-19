@@ -1,2 +1,4 @@
 # Test dependencies (see test_*.py). Runtime deps are in requirements.txt.
 pytest>=8.0
+# Lint. Pinned here and in CI; keep in step with ruff.toml's rule set.
+ruff==0.16.6

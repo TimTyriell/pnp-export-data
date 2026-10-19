@@ -26,7 +26,7 @@ import glob
 import json
 import re
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import config
@@ -134,7 +134,7 @@ def harvest_pending() -> list[dict]:
                 "title": match.group(1) if match else path.stem,
                 "file": path.name,
                 "saved": datetime.fromtimestamp(
-                    path.stat().st_mtime, timezone.utc
+                    path.stat().st_mtime, UTC
                 ).strftime("%Y-%m-%d"),
             }
         )
@@ -363,7 +363,7 @@ def build_actions(rows: list[dict]) -> list[dict]:
 
 
 def write_status(rows: list[dict]) -> dict:
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    now = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     status = {
         "schema": 1,
         "service": "pnp-export-data",

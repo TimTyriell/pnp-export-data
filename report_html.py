@@ -8,7 +8,7 @@ opened from disk, or published as a link and still work.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from wikimerge import KI_LABEL
 
@@ -415,6 +415,7 @@ _STATE_LABEL = {
 
 def _row(r: dict) -> str:
     flagged = "1" if r["anomalies"] else "0"
+    title = _esc(r["title"])
     flags = "".join(f'<span class="flag">{_esc(a)}</span>' for a in r["anomalies"])
     text = r.get("ki_text") or r.get("page_text") or ""
     source = (
@@ -423,9 +424,9 @@ def _row(r: dict) -> str:
         else "Ganze Seite — diese Seite hat noch keinen markierten KI-Abschnitt"
     )
     body = wikitext_to_html(text) or '<p class="empty">Kein Text abrufbar.</p>'
-    return f"""<details class="row" data-title="{_esc(r['title'])}" data-state="{r['ki_state']}" data-flagged="{flagged}">
+    return f"""<details class="row" data-title="{title}" data-state="{r['ki_state']}" data-flagged="{flagged}">
   <summary>
-    <span class="name">{_esc(r['title'])}</span>
+    <span class="name">{title}</span>
     <span class="state {r['ki_state']}">{_STATE_LABEL[r['ki_state']]}</span>
     <span class="meta">
       <span>{_esc(r['type'] or 'ohne Typ')}</span>
@@ -479,7 +480,7 @@ def _tasks(rows: list[dict]) -> str:
 
 
 def render(rows: list[dict]) -> str:
-    generated = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    generated = datetime.now(UTC).strftime("%d.%m.%Y %H:%M UTC")
     replacements = {
         "__N_TOTAL__": str(len(rows)),
         "__N_EDITED__": str(sum(1 for r in rows if r["ki_state"] == "edited")),

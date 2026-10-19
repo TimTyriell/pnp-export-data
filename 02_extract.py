@@ -234,12 +234,12 @@ def main() -> None:
         raise SystemExit(
             f"KB API not reachable at {config.KB_URL} ({exc}).\n"
             "Start it: cd ../pnp-knowledge/services/kb && python -m pnp_okf.api"
-        )
+        ) from exc
     try:
         page_map = pagemap.load(config.PAGEMAP_PATH)
     except (pagemap.PageMapError, ValueError) as exc:
         runlog.log(_STAGE, "error", level="error", detail=str(exc))
-        raise SystemExit(f"{config.PAGEMAP_PATH} ist fehlerhaft: {exc}")
+        raise SystemExit(f"{config.PAGEMAP_PATH} ist fehlerhaft: {exc}") from exc
     runlog.log(
         _STAGE, "pagemap_loaded",
         pages=len(page_map["pages"]), excluded=len(page_map["exclude"]),
