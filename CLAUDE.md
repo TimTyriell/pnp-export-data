@@ -47,8 +47,9 @@ stage 2 saves the concept bodies its alias/session call already returned into
 plan beside it comes from the same snapshot); stage 3 reads live pages through
 `WikiClient.read_many` in batches of 50 rather than one request per page; and
 stage 4 skips any proposal whose `.diff` is empty, because that edit would be a
-`nochange` round trip plus `EDIT_DELAY_S`. A *missing* `.diff` still uploads —
-absence is not proof the page is unchanged.
+`nochange` round trip plus `EDIT_DELAY_S`. A *missing* `.diff` on an `update`
+is skipped too (`reason="no_diff"`) — stage 3 writes one for every update, so
+its absence is suspect.
 
 Stages 2/3 are **deterministic** — the KB bodies are already synthesized,
 cited German markdown, so conversion cannot hallucinate. [md2wiki.py](md2wiki.py)

@@ -249,18 +249,15 @@ def build_overview_proposal(
     if not table:
         return {}
 
-    # The overview page may not exist yet — the table used to live as a section
-    # on another article. Merging against an empty page produces a fresh KI
-    # region, which stage 4 creates with --create like any other new page.
-    live = live_pages.get(title, "")
-    if not live and events is not None:
-        events.append(
-            {
-                "event": "overview_new",
-                "title": title,
-                "note": "page does not exist live — proposal is a new page",
-            }
-        )
+    # Fail closed (E1): stage 4 always treats the overview as an update, so
+    # merging against "" would replace the live page with the table. Creating
+    # the page is a human action (NEW_PAGES.md).
+    if title not in live_pages:
+        if events is not None:
+            events.append({"event": "skip_overview_no_live_copy", "level": "warn", "title": title})
+        return {}
+
+    live = live_pages[title]
     merged, decisions = merge_wikitext_verbose(live, table, title)
     if events is not None:
         events.append(
@@ -357,44 +354,42 @@ def generate_proposals(
 
         if entity["action"] == "update":
             live = live_pages.get(entity["wiki_title"], "")
-            # Additive merge: never delete hand-authored content. With no live
-            # copy fetched, fall back to the KB text (the diff makes that
-            # obvious to the reviewer).
+            # Additive merge: never delete hand-authored content.
             #
             # Membership, not truthiness: an *empty but existing* page (a stub
             # a human just created, or one blanked to clear a bad sync) must go
             # through the merge, so its content lands inside a KI region like
-            # every other page. Only a page we could not read at all falls back
-            # to raw KB text.
-            if entity["wiki_title"] in live_pages:
-                wikitext, decisions = merge_wikitext_verbose(
-                    live, kb_wikitext, entity["wiki_title"], composed
+            # every other page. A page we could not read at all gets no
+            # proposal (below).
+            if entity["wiki_title"] not in live_pages:
+                # Fail closed: an update page we could not read must not get a
+                # proposal at all. Stage 4 uploads full text with action=edit, so
+                # a raw-KB "proposal" here would replace the live page --
+                # infobox, images and hand-written prose included.
+                if events is not None:
+                    events.append({
+                        "event": "skip_no_live_copy", "level": "warn",
+                        "title": entity["wiki_title"],
+                        "note": "update page not readable live — no proposal written",
+                    })
+                continue
+            wikitext, decisions = merge_wikitext_verbose(
+                live, kb_wikitext, entity["wiki_title"], composed
+            )
+            if events is not None:
+                events.append(
+                    {
+                        "event": "merge",
+                        "title": entity["wiki_title"],
+                        "concept": entity["concept"],
+                        **decisions,
+                        "out_sha8": runlog.sha8(wikitext),
+                    }
                 )
-                if events is not None:
-                    events.append(
-                        {
-                            "event": "merge",
-                            "title": entity["wiki_title"],
-                            "concept": entity["concept"],
-                            **decisions,
-                            "out_sha8": runlog.sha8(wikitext),
-                        }
-                    )
-                    for anomaly in detect_anomalies(
-                        entity["wiki_title"], decisions, wikitext
-                    ):
-                        events.append({"event": "anomaly", "level": "warn", **anomaly})
-            else:
-                wikitext = kb_wikitext
-                if events is not None:
-                    events.append(
-                        {
-                            "event": "no_live_copy",
-                            "level": "warn",
-                            "title": entity["wiki_title"],
-                            "note": "wiki page not fetched — proposal is raw KB text",
-                        }
-                    )
+                for anomaly in detect_anomalies(
+                    entity["wiki_title"], decisions, wikitext
+                ):
+                    events.append({"event": "anomaly", "level": "warn", **anomaly})
             outputs[f"{safe_title}.wikitext"] = wikitext
             diff = "\n".join(
                 difflib.unified_diff(
@@ -475,11 +470,15 @@ def main() -> None:
         try:
             live_pages = WikiClient().read_many(titles)
         except requests.RequestException as exc:
+            # Fail closed: a partial proposal set is worse than none, because
+            # stage 4 cannot tell which files are trustworthy.
             runlog.log(
-                _STAGE, "wiki_unreachable", level="warn",
+                _STAGE, "abort", level="error", reason="wiki_unreachable",
                 detail=str(exc), remaining=len(titles),
-                echo=f"wiki unreachable ({exc}) — diffs against empty pages.",
+                echo=f"Wiki unreachable ({exc}) — no proposals written. "
+                     "Stage 3 needs the live pages to merge into; re-run when the wiki answers.",
             )
+            raise SystemExit(2) from exc
 
     events: list[dict] = []
     outputs = generate_proposals(plan, bodies, live_pages, events)

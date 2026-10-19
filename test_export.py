@@ -11,6 +11,7 @@ import json
 import re
 
 import pytest
+import requests
 
 import pagemap
 import wikimerge
@@ -172,6 +173,22 @@ def test_generate_proposals_writes_wikitext_diff_and_new_pages():
     assert "Lindo Laut.diff" not in outputs
     assert "NEW_PAGES.md" in outputs
     assert "Lindo Laut" in outputs["NEW_PAGES.md"]
+
+
+def test_generate_proposals_skips_an_update_without_a_live_copy():
+    """An update page we could not read gets no proposal at all — the raw KB
+    text would replace the live page on upload."""
+    plan = extract.plan_entities(_CONCEPTS, ["Die Hexe"])
+    bodies = {
+        "npcs/hexe": "# Die Hexe\n\nAlt.",
+        "characters/lindo_laut": "# Überblick\n\nBarde.",
+    }
+    events: list[dict] = []
+    outputs = generate.generate_proposals(plan, bodies, {}, events)
+
+    assert "Die Hexe.wikitext" not in outputs
+    assert "Die Hexe.diff" not in outputs
+    assert "skip_no_live_copy" in [e["event"] for e in events]
 
 
 def test_generate_proposals_links_inline_citations_and_drops_belege():
@@ -537,7 +554,8 @@ def test_upload_skips_pages_with_an_empty_diff(tmp_path, monkeypatch):
     (props / "Die Hexe.diff").write_text("\n", encoding="utf-8")  # unchanged
     (props / "Lindo Laut.wikitext").write_text("== Überblick ==\n", encoding="utf-8")
     (props / "Lindo Laut.diff").write_text("+neu\n", encoding="utf-8")
-    # No .diff at all is not proof of anything — that one still uploads.
+    # Every update proposal stage 3 writes has a .diff, so a missing one is
+    # suspect — skipped, not uploaded.
     (props / "Hartwacht.wikitext").write_text("== Überblick ==\n", encoding="utf-8")
 
     monkeypatch.setattr(upload.config, "WIKI_CACHE_DIR", cache)
@@ -550,13 +568,13 @@ def test_upload_skips_pages_with_an_empty_diff(tmp_path, monkeypatch):
 
     upload.main(apply=False)
 
-    assert [e["title"] for e in events if e["event"] == "upload"] == [
-        "Hartwacht",
-        "Lindo Laut",
-    ]
+    assert [e["title"] for e in events if e["event"] == "upload"] == ["Lindo Laut"]
     assert [
         e["title"] for e in events if e["event"] == "skip" and e["reason"] == "unchanged"
     ] == ["Die Hexe"]
+    assert [
+        e["title"] for e in events if e["event"] == "skip" and e["reason"] == "no_diff"
+    ] == ["Hartwacht"]
 
 
 # --- wiki client: batched reads ----------------------------------------------
@@ -673,12 +691,33 @@ def test_overview_empty_without_sessions():
     assert generate.render_story_overview([{"concept": "npcs/x", "type": "NPC"}]) == ""
 
 
-def test_overview_proposal_creates_the_page_when_it_is_missing(monkeypatch):
+def test_overview_proposal_needs_a_live_copy(monkeypatch):
     monkeypatch.setattr(generate.config, "STORY_OVERVIEW_PAGE", "Story Abschnitte")
     events: list[dict] = []
-    fresh = generate.build_overview_proposal(_OVERVIEW_PLAN, {}, events)
-    assert "|P-01" in fresh["Story Abschnitte.wikitext"]
-    assert "overview_new" in [e["event"] for e in events]
+    assert generate.build_overview_proposal(_OVERVIEW_PLAN, {}, events) == {}
+    assert "skip_overview_no_live_copy" in [e["event"] for e in events]
+
+
+def test_stage3_aborts_without_writing_when_the_wiki_is_unreachable(tmp_path, monkeypatch):
+    plan = extract.plan_entities(_CONCEPTS, ["Die Hexe"])
+    bodies = {m["concept"]: "# T\n\nText." for e in plan for m in pagemap.members_of(e)}
+    props = tmp_path / "proposals"
+    props.mkdir()
+    (props / "Sentinel.wikitext").write_text("hand-written", encoding="utf-8")
+
+    def unreachable(self, titles):
+        raise requests.ConnectionError("no route")
+
+    monkeypatch.setattr(generate, "load_plan", lambda: plan)
+    monkeypatch.setattr(generate, "cached_bodies", lambda: bodies)
+    monkeypatch.setattr(generate.WikiClient, "read_many", unreachable)
+    monkeypatch.setattr(generate.config, "PROPOSALS_DIR", props)
+    monkeypatch.setattr(generate.config, "LOGS_DIR", tmp_path / "logs")
+
+    with pytest.raises(SystemExit) as exc:
+        generate.main()
+    assert exc.value.code == 2
+    assert [p.name for p in props.iterdir()] == ["Sentinel.wikitext"]
 
 
 def test_overview_proposal_merges_into_a_live_page(monkeypatch):
