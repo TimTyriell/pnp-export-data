@@ -177,6 +177,11 @@ This service writes to a live wiki, so writes are gated by design:
 
 Do not weaken or bypass this gate (e.g. defaulting `DRY_RUN` to False, hardcoding
 `--apply`, or POSTing directly) without the user explicitly asking.
+An agent cannot clear it at run time either: `.claude/hooks/guard.ps1`
+(PreToolUse) blocks `04_upload.py --apply` unless the human started the session
+with `PNP_ALLOW_WIKI_WRITE=1`, and blocks commits on `main`. Self-check:
+`python .claude/hooks/test_guard.py`. A code change that weakens the gate is
+caught in review instead (`REVIEW.md`).
 
 **Upload contract (stage 3 → stage 4):** stage 3 writes `<stem>.base.json`
 (`basetimestamp` = the live revision it merged against, `live_sha8`) beside every

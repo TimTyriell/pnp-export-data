@@ -1,0 +1,65 @@
+"""Self-check for guard.ps1: every rule blocks, every override and neighbour passes.
+
+    python .claude/hooks/test_guard.py
+
+Copies the guard into a throwaway git repo (on main) so the checks never touch
+this checkout. Needs powershell (Windows) or pwsh. Not in CI.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SHELL = shutil.which("powershell") or shutil.which("pwsh")
+
+
+def run(repo: Path, tool: str, tool_input: dict, **env: str) -> int:
+    payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": str(repo)})
+    return subprocess.run(
+        [SHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+         str(repo / ".claude/hooks/guard.ps1")],
+        input=payload, capture_output=True, text=True, env={**os.environ, **env},
+    ).returncode
+
+
+def main() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        (repo / ".claude/hooks").mkdir(parents=True)
+        shutil.copy(HERE / "guard.ps1", repo / ".claude/hooks/guard.ps1")
+        git = ["git", "-C", str(repo)]
+        subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+
+        bash = lambda cmd: {"command": cmd}  # noqa: E731
+        cases = [
+            # (expected exit, tool, input, env)
+            (2, "Bash", bash("python 04_upload.py --apply"), {}),
+            (2, "Bash", bash("FANDOM_DRY_RUN=0 fandom_env/Scripts/python.exe 04_upload.py --apply --only X"), {}),
+            (2, "PowerShell", bash(r"$env:FANDOM_DRY_RUN='0'; python .\04_upload.py --apply"), {}),
+            (0, "Bash", bash("python 04_upload.py"), {}),
+            (0, "Bash", bash("python 04_upload.py --apply"), {"PNP_ALLOW_WIKI_WRITE": "1"}),
+            (0, "Bash", bash("python 03_generate.py --apply-merge"), {}),
+            (0, "Bash", bash('git commit -m "04_upload.py --apply is gated"'), {"PNP_ALLOW_MAIN_COMMIT": "1"}),
+            (2, "Bash", bash('git commit -m "x"'), {}),
+            (0, "Bash", bash('git commit -m "x"'), {"PNP_ALLOW_MAIN_COMMIT": "1"}),
+            (0, "Bash", bash("git status"), {}),
+            (0, "Bash", bash(""), {}),
+        ]
+        failures = [
+            f"expected {want}, got {got}: {tool} {inp} {env}"
+            for want, tool, inp, env in cases
+            if (got := run(repo, tool, inp, **env)) != want
+        ]
+        subprocess.run([*git, "switch", "-q", "-c", "feat/x"], check=True)
+        if run(repo, "Bash", bash('git commit -m "x"')) != 0:
+            failures.append("commit on a branch was blocked")
+        assert not failures, "\n".join(failures)
+        print(f"guard.ps1: {len(cases) + 1} checks passed")
+
+
+if __name__ == "__main__":
+    main()
