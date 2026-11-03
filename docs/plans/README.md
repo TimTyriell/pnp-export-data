@@ -32,6 +32,33 @@ Commit them (two commits: docs, then the toml), push, and open the PR. The
 and the `pagemap.py:26` docstring still show `ezhura`; fix both in the same
 toml commit.
 
+## Plan template
+
+New plans use this shape; older plans predate it (their *Goal* is the
+*Intent*). One file per change: intent, plan and proof travel together
+through review, so the PR shows what was meant, not just what was done.
+
+```markdown
+# <ID> — <title>
+
+## Intent
+Problem, wanted outcome, constraints (cost, privacy, frozen paths), open
+questions. A question only the human can answer: **STOP — ask the human**,
+with the default to propose.
+
+## Steps
+Files in order, risks, **HUMAN RUN** steps marked.
+
+## Done when
+- [ ] checklist items, each provable by a command below
+
+    <exact commands whose output proves every item>
+```
+
+Before the PR opens, run the `verifier` subagent (`.claude/agents/verifier.md`)
+on the plan: it runs lint, tests and the *Done when* commands in a fresh
+context and reports, never fixes. After the PR opens: `/review-pr <n>`.
+
 ## Rules for the implementing agent
 
 1. `git fetch origin && git switch -c <branch> origin/main` once E0 is
