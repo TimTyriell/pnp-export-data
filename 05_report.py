@@ -55,7 +55,7 @@ def create_page_url(title: str) -> str:
     MediaWiki opens the "create new page" editor for any non-existing title
     when ?action=edit is appended — no API call needed, just a link a human
     clicks to type the page by hand (pages are never created by the agent,
-    see CLAUDE.md).
+    see AGENTS.md).
     """
     return f"{page_url(title)}?action=edit"
 

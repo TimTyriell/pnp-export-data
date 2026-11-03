@@ -7,7 +7,7 @@ writes to the wiki, and it refuses to do so unless the review gate is cleared:
   * config.DRY_RUN must be False (env FANDOM_DRY_RUN=0), or pass --apply.
   * Without that, it prints what *would* be uploaded and exits.
 
-Two hard rules enforced here (see CLAUDE.md "The review gate"):
+Two hard rules enforced here (see AGENTS.md "The review gate"):
 
   * **The agent never creates pages.** Only proposals the stage-2 plan marked
     ``update`` (i.e. the page already exists on the wiki) are uploaded.
