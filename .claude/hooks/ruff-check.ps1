@@ -15,8 +15,6 @@ if (-not (Test-Path $filePath)) {
 
 $projectDir = $env:CLAUDE_PROJECT_DIR
 $candidates = @(
-    (Join-Path $projectDir "services\kb\.venv\Scripts\ruff.exe"),
-    (Join-Path $projectDir "services\dashboard\.venv\Scripts\ruff.exe"),
     (Join-Path $projectDir "fandom_env\Scripts\ruff.exe"),
     (Join-Path $projectDir ".venv\Scripts\ruff.exe")
 )

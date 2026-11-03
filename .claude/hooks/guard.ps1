@@ -11,6 +11,8 @@
 #   PNP_ALLOW_WIKI_WRITE=1    run 04_upload.py --apply
 #   PNP_ALLOW_MAIN_COMMIT=1   commit directly on main
 #   PNP_ALLOW_GUARD_EDIT=1    edit .claude/hooks/ or .claude/settings.json
+# Path rules see the Edit/Write tools, not shell writes (`>`, Set-Content);
+# review covers that gap (pnp-knowledge ADR-005).
 
 $repo = (Resolve-Path "$PSScriptRoot\..\..").Path
 try { $hook = [Console]::In.ReadToEnd() | ConvertFrom-Json } catch { exit 0 }
@@ -43,11 +45,17 @@ if ($hook.tool_name -in 'Edit', 'Write', 'MultiEdit') {
 if ($hook.tool_name -in 'Bash', 'PowerShell') {
     $cmd = [string]$in.command
     # Command position: start, or after a separator / env assignment / path.
-    # Keeps text inside commit messages and heredocs from matching.
     $at = '(?m)(^|[;&|(]\s*|\n\s*)(\w+=\S*\s+)*(\S*[\\/])?'
+    # Rules about *running* a script scan the whole command, so wrappers
+    # (`nohup`, `bash -c "..."`) can't hide a call. Text that is only a
+    # message is cut first: heredoc bodies and -m/--message/--body/--title.
+    $scan = [regex]::Replace($cmd, '(?s)<<-?\s*[''"]?(\w+)[''"]?.*?\n\s*\1\b', '')
+    $scan = [regex]::Replace($scan, '(-m|--message|--body|--title)\s+("[^"]*"|''[^'']*'')', '')
+    # Run as a script: python / python3.11 / py with any flags and path, or ./x.py.
+    $py = '(\bpy(thon[\d.]*)?(\.exe)?(\s+-\S+)*\s+(\S*[\\/])?|(^|[\s;&|(''"])\.[\\/])'
 
     if ($env:PNP_ALLOW_WIKI_WRITE -ne '1' -and
-        $cmd -match "$at(python3?(\.exe)?\s+)?(\S*[\\/])?04_upload\.py\b[^\n;&|]*--apply") {
+        $scan -match "${py}04_upload\.py\b[^\n;&|]*--apply") {
         Block "04_upload.py --apply writes to the public wiki. The human clears the review gate and runs it. Dry-run (no --apply) is fine. Override: PNP_ALLOW_WIKI_WRITE=1."
     }
 
