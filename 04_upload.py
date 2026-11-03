@@ -1,4 +1,4 @@
-"""Stage 4 — Upload: push approved proposals to the wiki (gated).
+﻿"""Stage 4 â€” Upload: push approved proposals to the wiki (gated).
 
 Reads the reviewed .wikitext files from config.PROPOSALS_DIR and edits the
 corresponding wiki pages via the MediaWiki API. This is the only stage that
@@ -7,11 +7,11 @@ writes to the wiki, and it refuses to do so unless the review gate is cleared:
   * config.DRY_RUN must be False (env FANDOM_DRY_RUN=0), or pass --apply.
   * Without that, it prints what *would* be uploaded and exits.
 
-Two hard rules enforced here (see CLAUDE.md "The review gate"):
+Two hard rules enforced here (see AGENTS.md "The review gate"):
 
   * **The agent never creates pages.** Only proposals the stage-2 plan marked
     ``update`` (i.e. the page already exists on the wiki) are uploaded.
-    ``create`` proposals are skipped — a human initializes those pages
+    ``create`` proposals are skipped â€” a human initializes those pages
     manually from proposals/NEW_PAGES.md, and the next sync fills them via
     the update path.
   * Uploads target the page title as-is (an existing page). The
@@ -48,8 +48,8 @@ def _titles_by_stem(plan: list[dict]) -> dict[str, str]:
 
     A filename cannot hold every character a wiki title can ("/" makes a
     subpage on the wiki but is a path separator here), so the stem is a lossy
-    form. Taking the title from it uploaded "Katze (Ajani / Günther)" as
-    "Katze (Ajani _ Günther)", which the wiki then stored with a space. The
+    form. Taking the title from it uploaded "Katze (Ajani / GÃ¼nther)" as
+    "Katze (Ajani _ GÃ¼nther)", which the wiki then stored with a space. The
     plan is where the title actually lives.
     """
 
@@ -60,7 +60,7 @@ def _update_titles(plan: list[dict]) -> set[str]:
     """Wiki titles the plan marked ``update``."""
 
     titles = {e["wiki_title"] for e in plan if e.get("action") == "update"}
-    # Not a concept, so never in the plan — but it is an existing page that
+    # Not a concept, so never in the plan â€” but it is an existing page that
     # stage 3 merged, and it must go up the same way (see render_story_overview).
     if config.STORY_OVERVIEW_PAGE:
         titles.add(config.STORY_OVERVIEW_PAGE)
@@ -76,7 +76,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
     a decision a human makes per batch. MediaWiki's ``action=edit`` creates a
     missing page with the same call, so there is no second code path.
 
-    *only* restricts the run to titles containing that substring — how a big
+    *only* restricts the run to titles containing that substring â€” how a big
     batch gets rolled out: one page live, look at it, then the rest.
     """
 
@@ -86,7 +86,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
     if not config.PROPOSALS_DIR.exists():
         runlog.log(
             _STAGE, "abort", level="warn", reason="no_proposals_dir",
-            echo="No proposals/ directory — run stage 3 first.",
+            echo="No proposals/ directory â€” run stage 3 first.",
         )
         return
 
@@ -106,7 +106,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
     if plan is None:
         runlog.log(
             _STAGE, "abort", level="warn", reason="no_plan",
-            echo="wiki_cache/entities.json missing — cannot tell updates from "
+            echo="wiki_cache/entities.json missing â€” cannot tell updates from "
                  "new pages. Run 02_extract.py first (the agent never creates "
                  "pages).",
         )
@@ -126,10 +126,10 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
         # Pages with no plan entry (the episode overview) keep the stem.
         title = title_by_stem.get(path.stem, path.stem)
         if title not in updates and not create:
-            skipped_new += 1  # a proposed *new* page — humans create these
+            skipped_new += 1  # a proposed *new* page â€” humans create these
             runlog.log(_STAGE, "skip", title=title, reason="create")
             continue
-        # An empty .diff means the merge produced the live page verbatim — the
+        # An empty .diff means the merge produced the live page verbatim â€” the
         # edit would come back as "nochange" after a full round trip plus
         # EDIT_DELAY_S. Skip it. A *missing* .diff is not proof of anything
         # (older run, hand-dropped file), so that still uploads.
@@ -140,7 +140,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
             continue
         text = path.read_text(encoding="utf-8")
         # sha8 + mtime tie this upload to the stage-3 `write` event that
-        # produced the file — proposals/ keeps files from older runs.
+        # produced the file â€” proposals/ keeps files from older runs.
         meta = {
             "title": title,
             "bytes": len(text),
@@ -160,7 +160,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
                 runlog.log(
                     _STAGE, "upload_failed", level="error", **meta,
                     code=err.get("code", "?"), info=err.get("info", ""),
-                    echo=f"FAILED {title}: {err.get('code', '?')} — {err.get('info', '')}",
+                    echo=f"FAILED {title}: {err.get('code', '?')} â€” {err.get('info', '')}",
                 )
             else:
                 uploaded += 1
@@ -185,7 +185,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
             f"{unchanged} unchanged (empty diff, skipped); "
             + (
                 f"{skipped_new} new-page proposal(s) skipped (see NEW_PAGES.md "
-                "— create those manually, or re-run with --create)."
+                "â€” create those manually, or re-run with --create)."
                 if not create
                 else "new pages included (--create)."
             )
@@ -196,7 +196,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
         for title, info in failures:
             print(f"  {title}: {info}")
         print(
-            "Re-run to finish — edits are idempotent, pages already written "
+            "Re-run to finish â€” edits are idempotent, pages already written "
             "come back as 'nochange'."
         )
     if not do_apply:

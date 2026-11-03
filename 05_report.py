@@ -1,17 +1,17 @@
-"""Stage 5 — Report: a shareable overview of every KI-edited wiki page.
+﻿"""Stage 5 â€” Report: a shareable overview of every KI-edited wiki page.
 
 Answers "which pages did the KI write, when was each last touched, and which
 ones need a human?" in a form the team can read without access to this repo:
 
   reports/ki_pages.md    table + a "needs attention" list, paste-ready
-  reports/ki_pages.csv   same rows + an empty "Zuständig" column for assigning
+  reports/ki_pages.csv   same rows + an empty "ZustÃ¤ndig" column for assigning
   reports/ki_pages.html  self-contained page: same overview, texts readable
-                         inline, searchable — the one to hand to the group
+                         inline, searchable â€” the one to hand to the group
   reports/ki_pages.json  machine copy, includes each page's text
 
 Which pages count as KI-edited comes from the wiki itself (the bot account's
 contributions, filtered by the pipeline's edit summary), not from local run
-logs — the wiki knows about every run, this machine only about its own. Run
+logs â€” the wiki knows about every run, this machine only about its own. Run
 logs are still read for the latest anomalies per page.
 
 Read-only: this stage never edits the wiki.
@@ -38,13 +38,13 @@ from wikimerge import KI_LABEL, ki_region_state
 _STAGE = "05_report"
 
 # Every edit this pipeline makes carries this summary (see 04_upload.py), which
-# is what separates the bot's edits from the human edits of the same account —
+# is what separates the bot's edits from the human edits of the same account â€”
 # a bot password logs in as the owning user, not as a separate one.
 EDIT_SUMMARY = "pnp-fandom-service update"
 
 _STATE_LABEL = {
-    "clean": "unverändert",
-    "edited": "vom Team überarbeitet",
+    "clean": "unverÃ¤ndert",
+    "edited": "vom Team Ã¼berarbeitet",
     "absent": "kein KI-Abschnitt",
 }
 
@@ -58,9 +58,9 @@ def create_page_url(title: str) -> str:
     """Direct link to the wiki's editor for a page that doesn't exist yet.
 
     MediaWiki opens the "create new page" editor for any non-existing title
-    when ?action=edit is appended — no API call needed, just a link a human
+    when ?action=edit is appended â€” no API call needed, just a link a human
     clicks to type the page by hand (pages are never created by the agent,
-    see CLAUDE.md).
+    see AGENTS.md).
     """
     return f"{page_url(title)}?action=edit"
 
@@ -80,7 +80,7 @@ def ki_edits(client: WikiClient) -> dict[str, str]:
 
 
 def run_logs_newest_first() -> list[str]:
-    """Run logs by mtime, newest first — a custom PNP_RUN_ID ("agent-foo")
+    """Run logs by mtime, newest first â€” a custom PNP_RUN_ID ("agent-foo")
     makes the filename useless for ordering."""
 
     return sorted(
@@ -120,7 +120,7 @@ def harvest_pending() -> list[dict]:
     """Rescued hand-written text still waiting to reach the KB.
 
     The live ``edited`` state only lasts until the next sync rewrites the
-    region, but the obligation outlives it — these files are the task.
+    region, but the obligation outlives it â€” these files are the task.
     """
 
     if not config.HARVEST_DIR.is_dir():
@@ -184,7 +184,7 @@ def collect(client: WikiClient) -> list[dict]:
 
 
 def _date(ts: str) -> str:
-    return ts[:10] if ts else "—"
+    return ts[:10] if ts else "â€”"
 
 
 def render_markdown(rows: list[dict]) -> str:
@@ -192,29 +192,29 @@ def render_markdown(rows: list[dict]) -> str:
         "# KI-gepflegte Wiki-Seiten",
         "",
         f"{len(rows)} Seiten, zuletzt von der KI bearbeitet. Erzeugt aus den "
-        "Bot-Beiträgen des Wikis (`05_report.py`) — Stand siehe Datum je Zeile.",
+        "Bot-BeitrÃ¤gen des Wikis (`05_report.py`) â€” Stand siehe Datum je Zeile.",
         "",
         "Jede Seite hat zwei Teile, getrennt durch die Zeile "
-        f"*„{KI_LABEL}“*. Oben steht die Handarbeit des Teams, unten der Teil "
+        f"*â€ž{KI_LABEL}â€œ*. Oben steht die Handarbeit des Teams, unten der Teil "
         "aus der Wissensbasis, der bei jedem Abgleich neu geschrieben wird. "
-        "Steht bei einer Seite *vom Team überarbeitet*, hat jemand unter der "
+        "Steht bei einer Seite *vom Team Ã¼berarbeitet*, hat jemand unter der "
         "Trennlinie geschrieben: dieser Text ist Wissen, das die Wissensbasis "
         "noch nicht hat. Die Seite bleibt dann unangetastet, bis er dort "
-        "angekommen ist — überschrieben wird er nie.",
+        "angekommen ist â€” Ã¼berschrieben wird er nie.",
         "",
         "| Seite | Typ | Letzte KI-Bearbeitung | Letzte Bearbeitung | Von | KI-Abschnitt | Hinweise |",
         "|---|---|---|---|---|---|---|",
     ]
     for r in rows:
-        notes = ", ".join(r["anomalies"]) or "—"
+        notes = ", ".join(r["anomalies"]) or "â€”"
         out.append(
-            f"| [{r['title']}]({r['url']}) | {r['type'] or '—'} | "
+            f"| [{r['title']}]({r['url']}) | {r['type'] or 'â€”'} | "
             f"{_date(r['ki_last_edit'])} | {_date(r['last_edit'])} | "
-            f"{r['last_editor'] or '—'} | {_STATE_LABEL[r['ki_state']]} | {notes} |"
+            f"{r['last_editor'] or 'â€”'} | {_STATE_LABEL[r['ki_state']]} | {notes} |"
         )
 
     # Only what a person should act on. "kein KI-Abschnitt" is a pipeline
-    # state, not a task — those pages get their region on the next sync, so
+    # state, not a task â€” those pages get their region on the next sync, so
     # they are counted below instead of padding the list to every page.
     harvest = [r for r in rows if r["ki_state"] == "edited"]
     flagged = [r for r in rows if r["anomalies"]]
@@ -224,34 +224,34 @@ def render_markdown(rows: list[dict]) -> str:
     out += ["", "## Zu erledigen", ""]
     if harvest:
         out += [
-            "**Team-Text in die Wissensbasis übernehmen** — jemand hat unter "
+            "**Team-Text in die Wissensbasis Ã¼bernehmen** â€” jemand hat unter "
             "der Trennlinie geschrieben. Die Seite wird bis dahin nicht mehr "
             "angefasst, der Text also auch nicht aktualisiert:",
             "",
         ]
         for r in harvest:
             file = saved.get(r["title"])
-            where = f" · gesichert in `harvest/{file['file']}`" if file else ""
+            where = f" Â· gesichert in `harvest/{file['file']}`" if file else ""
             out.append(
-                f"- [{r['title']}]({r['url']}) — {r['last_editor']}, "
+                f"- [{r['title']}]({r['url']}) â€” {r['last_editor']}, "
                 f"{_date(r['last_edit'])}{where}"
             )
         out.append("")
     if flagged:
         out += [
-            "**Gegenlesen** — die letzte Generierung war bei diesen Seiten "
-            "auffällig (meist doppelter Text):",
+            "**Gegenlesen** â€” die letzte Generierung war bei diesen Seiten "
+            "auffÃ¤llig (meist doppelter Text):",
             "",
         ]
-        out += [f"- [{r['title']}]({r['url']}) — {', '.join(r['anomalies'])}" for r in flagged]
+        out += [f"- [{r['title']}]({r['url']}) â€” {', '.join(r['anomalies'])}" for r in flagged]
         out.append("")
     if not harvest and not flagged:
         out += ["Nichts offen.", ""]
     if absent:
         out += [
             f"*{len(absent)} Seite(n) haben noch keinen markierten KI-Abschnitt "
-            "(vor dessen Einführung hochgeladen). Der nächste Abgleich holt das "
-            "nach — kein Handlungsbedarf.*",
+            "(vor dessen EinfÃ¼hrung hochgeladen). Der nÃ¤chste Abgleich holt das "
+            "nach â€” kein Handlungsbedarf.*",
             "",
         ]
     return "\n".join(out)
@@ -268,7 +268,7 @@ def write_reports(rows: list[dict]) -> list[str]:
     csv_path = config.REPORTS_DIR / "ki_pages.csv"
     fields = [
         "title", "url", "type", "ki_last_edit", "last_edit", "last_editor",
-        "ki_state", "bytes", "ki_bytes", "anomalies", "Zuständig",
+        "ki_state", "bytes", "ki_bytes", "anomalies", "ZustÃ¤ndig",
     ]
     with csv_path.open("w", encoding="utf-8-sig", newline="") as fh:
         # utf-8-sig: Excel reads umlauts wrong without the BOM.
@@ -279,7 +279,7 @@ def write_reports(rows: list[dict]) -> list[str]:
                 {
                     **{k: r[k] for k in fields if k in r},
                     "anomalies": " ".join(r["anomalies"]),
-                    "Zuständig": "",
+                    "ZustÃ¤ndig": "",
                 }
             )
     written.append(str(csv_path))
@@ -346,7 +346,7 @@ def _planned_stubs() -> list[str]:
 def build_actions(rows: list[dict]) -> list[dict]:
     actions = []
     for path in sorted(config.HARVEST_DIR.glob("*.md")) if config.HARVEST_DIR.is_dir() else []:
-        actions.append({"kind": "harvest", "label": "Team-Text muss in KB übernommen werden", "ref": path.name})
+        actions.append({"kind": "harvest", "label": "Team-Text muss in KB Ã¼bernommen werden", "ref": path.name})
     for title in _planned_stubs():
         actions.append({
             "kind": "stub",
@@ -356,7 +356,7 @@ def build_actions(rows: list[dict]) -> list[dict]:
         })
     for r in rows:
         if r["ki_state"] == "edited":
-            actions.append({"kind": "edited", "label": "KI-Abschnitt vom Team überarbeitet", "ref": r["title"]})
+            actions.append({"kind": "edited", "label": "KI-Abschnitt vom Team Ã¼berarbeitet", "ref": r["title"]})
         for anomaly in r["anomalies"]:
             actions.append({"kind": "anomaly", "label": anomaly, "ref": r["title"]})
     return actions
@@ -369,7 +369,7 @@ def write_status(rows: list[dict]) -> dict:
         "service": "pnp-export-data",
         "generated_at": now,
         "last_run": _last_run_counts(),
-        # Without the page bodies — the dashboard lists pages, it does not
+        # Without the page bodies â€” the dashboard lists pages, it does not
         # render them, and they are ~300 KB.
         "items": [{k: v for k, v in r.items() if k != "page_text"} for r in rows],
         "actions": build_actions(rows),
@@ -403,8 +403,8 @@ def main() -> None:
         _STAGE, "stage_end", pages=len(rows), edited_by_team=edited,
         files=written, actions=len(status["actions"]),
         echo=(
-            f"{len(rows)} KI-Seiten erfasst ({edited} vom Team überarbeitet). "
-            + " · ".join(written)
+            f"{len(rows)} KI-Seiten erfasst ({edited} vom Team Ã¼berarbeitet). "
+            + " Â· ".join(written)
         ),
     )
 
