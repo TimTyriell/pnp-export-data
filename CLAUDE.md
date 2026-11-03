@@ -179,7 +179,8 @@ Do not weaken or bypass this gate (e.g. defaulting `DRY_RUN` to False, hardcodin
 `--apply`, or POSTing directly) without the user explicitly asking.
 An agent cannot clear it at run time either: `.claude/hooks/guard.ps1`
 (PreToolUse) blocks `04_upload.py --apply` unless the human started the session
-with `PNP_ALLOW_WIKI_WRITE=1`, and blocks commits on `main`. Self-check:
+with `PNP_ALLOW_WIKI_WRITE=1`, and blocks commits on `main` and edits to the
+guard itself. Self-check:
 `python .claude/hooks/test_guard.py`. A code change that weakens the gate is
 caught in review instead: before merging, run `/review-pr <n>` (or headless,
 clean context: `claude -p "/review-pr <n>"`), which reviews against

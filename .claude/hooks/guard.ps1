@@ -10,6 +10,7 @@
 # Env overrides for the human, set before starting Claude:
 #   PNP_ALLOW_WIKI_WRITE=1    run 04_upload.py --apply
 #   PNP_ALLOW_MAIN_COMMIT=1   commit directly on main
+#   PNP_ALLOW_GUARD_EDIT=1    edit .claude/hooks/ or .claude/settings.json
 
 $repo = (Resolve-Path "$PSScriptRoot\..\..").Path
 try { $hook = [Console]::In.ReadToEnd() | ConvertFrom-Json } catch { exit 0 }
@@ -19,6 +20,24 @@ $cwd = if ($hook.cwd) { $hook.cwd } else { (Get-Location).Path }
 function Block([string]$why) {
     [Console]::Error.WriteLine("Blocked by $repo\.claude\hooks\guard.ps1: $why")
     exit 2
+}
+
+# Path of $p relative to this repo, '/'-separated, or $null when outside it.
+function RepoRel([string]$p) {
+    if (-not $p) { return $null }
+    if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $cwd $p }
+    $full = [IO.Path]::GetFullPath($p)
+    if (-not $full.StartsWith("$repo\", 'OrdinalIgnoreCase')) { return $null }
+    return $full.Substring($repo.Length + 1) -replace '\\', '/'
+}
+
+if ($hook.tool_name -in 'Edit', 'Write', 'MultiEdit') {
+    $rel = RepoRel $in.file_path
+    if (-not $rel) { exit 0 }
+    if ($rel -match '^\.claude/(hooks/|settings(\.local)?\.json$)' -and $env:PNP_ALLOW_GUARD_EDIT -ne '1') {
+        Block "the guards protect themselves: .claude/hooks/ and .claude/settings.json are the human's to change. Override: PNP_ALLOW_GUARD_EDIT=1."
+    }
+    exit 0
 }
 
 if ($hook.tool_name -in 'Bash', 'PowerShell') {

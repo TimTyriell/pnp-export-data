@@ -34,9 +34,15 @@ def main() -> None:
         git = ["git", "-C", str(repo)]
         subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
 
+        edit = lambda path: {"file_path": str(repo / path), "old_string": "y", "new_string": "x"}  # noqa: E731
+        write = lambda path: {"file_path": str(repo / path), "content": "{}"}  # noqa: E731
         bash = lambda cmd: {"command": cmd}  # noqa: E731
         cases = [
             # (expected exit, tool, input, env)
+            (2, "Edit", edit(".claude/hooks/guard.ps1"), {}),
+            (2, "Write", write(".claude/settings.json"), {}),
+            (0, "Write", write(".claude/settings.json"), {"PNP_ALLOW_GUARD_EDIT": "1"}),
+            (0, "Edit", edit(".claude/agents/verifier.md"), {}),
             (2, "Bash", bash("python 04_upload.py --apply"), {}),
             (2, "Bash", bash("FANDOM_DRY_RUN=0 fandom_env/Scripts/python.exe 04_upload.py --apply --only X"), {}),
             (2, "PowerShell", bash(r"$env:FANDOM_DRY_RUN='0'; python .\04_upload.py --apply"), {}),
