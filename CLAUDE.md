@@ -178,8 +178,9 @@ This service writes to a live wiki, so writes are gated by design:
 Do not weaken or bypass this gate (e.g. defaulting `DRY_RUN` to False, hardcoding
 `--apply`, or POSTing directly) without the user explicitly asking.
 An agent can't clear it through its normal tools either: `.claude/hooks/guard.ps1`
-(PreToolUse) blocks `04_upload.py --apply` unless the human started the session
-with `PNP_ALLOW_WIKI_WRITE=1`, and blocks commits on `main` and edits to the
+(PreToolUse) blocks `04_upload.py --apply` unless the human set
+`PNP_ALLOW_WIKI_WRITE=1` in `.claude/guards.env` (gitignored; copy
+`.claude/guards.env.example`, which lists every switch), and blocks commits on `main` and edits to the
 guard itself. Self-check:
 `python .claude/hooks/test_guard.py`. A code change that weakens the gate is
 caught in review instead: before merging, run `/review-pr <n>` (or headless,

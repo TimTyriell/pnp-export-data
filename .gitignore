@@ -19,3 +19,6 @@ status/
 # Editor / OS cruft
 .DS_Store
 ._*
+
+# Guard switches, per checkout (template: .claude/guards.env.example)
+.claude/guards.env
