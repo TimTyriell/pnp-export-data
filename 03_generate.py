@@ -25,6 +25,7 @@ Run:  python 03_generate.py          (KB API up; wiki reachable for diffs)
 from __future__ import annotations
 
 import difflib
+import importlib
 import json
 import re
 import unicodedata
@@ -34,6 +35,7 @@ import requests
 import config
 import pagemap
 import runlog
+import wikimerge
 from md2wiki import (
     LinkResolver,
     markdown_to_wikitext,
@@ -41,8 +43,10 @@ from md2wiki import (
     strip_transcription_variants,
 )
 from wiki_client import WikiClient
-import wikimerge
-from wikimerge import _norm, _HEADING_RE, merge_wikitext_verbose
+from wikimerge import _HEADING_RE, _norm, merge_wikitext_verbose
+
+# 02_extract starts with a digit, so it cannot be a plain import statement.
+extract = importlib.import_module("02_extract")
 
 _STAGE = "03_generate"
 
@@ -55,6 +59,9 @@ def detect_anomalies(title: str, decisions: dict, wikitext: str) -> list[dict]:
     """
 
     found: list[dict] = []
+    # The merge hands a page off when its KI markers are malformed; say so here.
+    if decisions.get("ki_marker_problem"):
+        found.append({"kind": decisions["ki_marker_problem"]})
     # The set the merge actually matches against (any level), not just the
     # level-2 headings sections are carved from.
     live_headings = decisions.get("live_headings_all") or decisions["live_headings"]
@@ -136,7 +143,11 @@ def prune_proposals(keep: set[str]) -> int:
     for path in sorted(config.PROPOSALS_DIR.iterdir()):
         if not path.is_file() or path.name in keep:
             continue
-        if path.suffix not in _OURS and path.name != "NEW_PAGES.md":
+        if (
+            path.suffix not in _OURS
+            and path.name != "NEW_PAGES.md"
+            and not path.name.endswith(".base.json")  # stage 4 sidecar, see generate_proposals
+        ):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         runlog.log(
@@ -156,6 +167,11 @@ def _slug(text: str) -> str:
         .decode()
     )
     return re.sub(r"[^a-z0-9]+", "-", ascii_only).strip("-")
+
+
+def _cell(text: str) -> str:
+    """Text safe inside a wikitable cell: no pipes, no line breaks."""
+    return " ".join((text or "").split()).replace("|", "&#124;")
 
 
 def render_story_overview(plan: list[dict]) -> str:
@@ -203,7 +219,7 @@ def render_story_overview(plan: list[dict]) -> str:
         # cannot carry the <svg> icon Fandom's own chrome uses. Without that
         # CSS the toggle still works, it just has no arrow.
         lines += [
-            f'== <span class="pnp-klapp mw-customtoggle-{slug}">{label}</span> ==',
+            f'== <span class="pnp-klapp mw-customtoggle-{slug}">{_cell(label)}</span> ==',
             "",
             f'<div class="mw-collapsible{collapsed}" id="mw-customcollapsible-{slug}">',
             '<div class="mw-collapsible-content">',
@@ -216,7 +232,7 @@ def render_story_overview(plan: list[dict]) -> str:
         ]
         for entry in entries:
             ep = entry["episode"]
-            name = (ep.get("episode_title") or "").strip()
+            name = _cell(ep.get("episode_title"))
             # The page exists either way; without an Abenteuername the id is
             # the only label there is.
             link = (
@@ -228,15 +244,30 @@ def render_story_overview(plan: list[dict]) -> str:
                 "|-",
                 f"|{ep['episode']}",
                 f"|{link}",
-                f"|{(ep.get('description') or '').strip()}",
-                f"|{ep.get('resource') or ''}",
+                f"|{_cell(ep.get('description'))}",
+                f"|{_cell(ep.get('resource'))}",
             ]
         lines += ["|}", "</div>", "</div>", ""]
     return "\n".join(lines)
 
 
+def base_sidecar(title: str, live: str, live_rev: str) -> str:
+    """The stage-4 guard for an update: the live revision this proposal merged
+    against. Stage 4 sends it as basetimestamp, so a human edit made since
+    stage 3 is a conflict instead of a silent overwrite."""
+
+    return json.dumps(
+        {"title": title, "basetimestamp": live_rev, "live_sha8": runlog.sha8(live)},
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
+
+
 def build_overview_proposal(
-    plan: list[dict], live_pages: dict[str, str], events: list[dict] | None = None
+    plan: list[dict],
+    live_pages: dict[str, str],
+    events: list[dict] | None = None,
+    live_revs: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """``{filename: content}`` for the episode overview page, or ``{}``.
 
@@ -249,18 +280,15 @@ def build_overview_proposal(
     if not table:
         return {}
 
-    # The overview page may not exist yet — the table used to live as a section
-    # on another article. Merging against an empty page produces a fresh KI
-    # region, which stage 4 creates with --create like any other new page.
-    live = live_pages.get(title, "")
-    if not live and events is not None:
-        events.append(
-            {
-                "event": "overview_new",
-                "title": title,
-                "note": "page does not exist live — proposal is a new page",
-            }
-        )
+    # Fail closed (E1): stage 4 always treats the overview as an update, so
+    # merging against "" would replace the live page with the table. Creating
+    # the page is a human action (NEW_PAGES.md).
+    if title not in live_pages:
+        if events is not None:
+            events.append({"event": "skip_overview_no_live_copy", "level": "warn", "title": title})
+        return {}
+
+    live = live_pages[title]
     merged, decisions = merge_wikitext_verbose(live, table, title)
     if events is not None:
         events.append(
@@ -282,7 +310,10 @@ def build_overview_proposal(
             lineterm="",
         )
     )
-    return {f"{safe}.wikitext": merged, f"{safe}.diff": diff + "\n"}
+    out = {f"{safe}.wikitext": merged, f"{safe}.diff": diff + "\n"}
+    if live_revs is not None and title in live_revs:
+        out[f"{safe}.base.json"] = base_sidecar(title, live, live_revs[title])
+    return out
 
 
 def load_plan() -> list[dict]:
@@ -295,7 +326,7 @@ def load_plan() -> list[dict]:
 def fetch_body(session: requests.Session, concept: str) -> str:
     resp = session.get(f"{config.KB_URL}/concepts/{concept}", timeout=30)
     resp.raise_for_status()
-    return resp.json()["body_md"]
+    return extract.concept_payload(resp.json(), concept)[1]
 
 
 def cached_bodies() -> dict[str, str]:
@@ -317,11 +348,14 @@ def generate_proposals(
     bodies: dict[str, str],
     live_pages: dict[str, str],
     events: list[dict] | None = None,
+    live_revs: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Pure core (offline-testable): return ``filename -> content``.
 
     ``events`` (optional) collects per-page merge decisions and anomalies for
     the caller to write to the run log — the core itself stays I/O-free.
+    ``live_revs`` maps each live title to its revision timestamp; every update
+    then gets a ``<stem>.base.json`` sidecar (see base_sidecar).
     """
 
     resolver = LinkResolver(
@@ -357,44 +391,42 @@ def generate_proposals(
 
         if entity["action"] == "update":
             live = live_pages.get(entity["wiki_title"], "")
-            # Additive merge: never delete hand-authored content. With no live
-            # copy fetched, fall back to the KB text (the diff makes that
-            # obvious to the reviewer).
+            # Additive merge: never delete hand-authored content.
             #
             # Membership, not truthiness: an *empty but existing* page (a stub
             # a human just created, or one blanked to clear a bad sync) must go
             # through the merge, so its content lands inside a KI region like
-            # every other page. Only a page we could not read at all falls back
-            # to raw KB text.
-            if entity["wiki_title"] in live_pages:
-                wikitext, decisions = merge_wikitext_verbose(
-                    live, kb_wikitext, entity["wiki_title"], composed
+            # every other page. A page we could not read at all gets no
+            # proposal (below).
+            if entity["wiki_title"] not in live_pages:
+                # Fail closed: an update page we could not read must not get a
+                # proposal at all. Stage 4 uploads full text with action=edit, so
+                # a raw-KB "proposal" here would replace the live page --
+                # infobox, images and hand-written prose included.
+                if events is not None:
+                    events.append({
+                        "event": "skip_no_live_copy", "level": "warn",
+                        "title": entity["wiki_title"],
+                        "note": "update page not readable live — no proposal written",
+                    })
+                continue
+            wikitext, decisions = merge_wikitext_verbose(
+                live, kb_wikitext, entity["wiki_title"], composed
+            )
+            if events is not None:
+                events.append(
+                    {
+                        "event": "merge",
+                        "title": entity["wiki_title"],
+                        "concept": entity["concept"],
+                        **decisions,
+                        "out_sha8": runlog.sha8(wikitext),
+                    }
                 )
-                if events is not None:
-                    events.append(
-                        {
-                            "event": "merge",
-                            "title": entity["wiki_title"],
-                            "concept": entity["concept"],
-                            **decisions,
-                            "out_sha8": runlog.sha8(wikitext),
-                        }
-                    )
-                    for anomaly in detect_anomalies(
-                        entity["wiki_title"], decisions, wikitext
-                    ):
-                        events.append({"event": "anomaly", "level": "warn", **anomaly})
-            else:
-                wikitext = kb_wikitext
-                if events is not None:
-                    events.append(
-                        {
-                            "event": "no_live_copy",
-                            "level": "warn",
-                            "title": entity["wiki_title"],
-                            "note": "wiki page not fetched — proposal is raw KB text",
-                        }
-                    )
+                for anomaly in detect_anomalies(
+                    entity["wiki_title"], decisions, wikitext
+                ):
+                    events.append({"event": "anomaly", "level": "warn", **anomaly})
             outputs[f"{safe_title}.wikitext"] = wikitext
             diff = "\n".join(
                 difflib.unified_diff(
@@ -406,6 +438,10 @@ def generate_proposals(
                 )
             )
             outputs[f"{safe_title}.diff"] = diff + "\n"
+            if live_revs is not None and entity["wiki_title"] in live_revs:
+                outputs[f"{safe_title}.base.json"] = base_sidecar(
+                    entity["wiki_title"], live, live_revs[entity["wiki_title"]]
+                )
         else:
             # A page the agent creates is born with its KI region. Without the
             # markers the *next* sync sees ki_state='absent' and has to guess,
@@ -432,7 +468,7 @@ def generate_proposals(
         for e in sorted(new_pages, key=lambda e: e["wiki_title"]):
             lines.append(
                 f"* **{e['wiki_title']}** ({e['type']}, `{e['concept']}`)"
-                f" — Vorschlag: `{e['wiki_title'].replace('/', '_')}.wikitext`"
+                f" — Vorschlag: `{proposal_filename(e['wiki_title'])}.wikitext`"
             )
         outputs["NEW_PAGES.md"] = "\n".join(lines) + "\n"
 
@@ -462,9 +498,10 @@ def main() -> None:
                 runlog.log(
                     _STAGE, "error", level="error", concept=concept, detail=str(exc)
                 )
-                raise SystemExit(f"KB API not reachable ({exc}).")
+                raise SystemExit(f"KB API not reachable ({exc}).") from exc
 
     live_pages: dict[str, str] = {}
+    live_revs: dict[str, str] = {}
     updates = [e for e in plan if e["action"] == "update"]
     if updates or config.STORY_OVERVIEW_PAGE:
         titles = [e["wiki_title"] for e in updates]
@@ -473,17 +510,23 @@ def main() -> None:
         if config.STORY_OVERVIEW_PAGE:
             titles.append(config.STORY_OVERVIEW_PAGE)
         try:
-            live_pages = WikiClient().read_many(titles)
+            with_revs = WikiClient().read_many_with_revs(titles)
+            live_pages = {t: text for t, (text, _ts) in with_revs.items()}
+            live_revs = {t: ts for t, (_text, ts) in with_revs.items()}
         except requests.RequestException as exc:
+            # Fail closed: a partial proposal set is worse than none, because
+            # stage 4 cannot tell which files are trustworthy.
             runlog.log(
-                _STAGE, "wiki_unreachable", level="warn",
+                _STAGE, "abort", level="error", reason="wiki_unreachable",
                 detail=str(exc), remaining=len(titles),
-                echo=f"wiki unreachable ({exc}) — diffs against empty pages.",
+                echo=f"Wiki unreachable ({exc}) — no proposals written. "
+                     "Stage 3 needs the live pages to merge into; re-run when the wiki answers.",
             )
+            raise SystemExit(2) from exc
 
     events: list[dict] = []
-    outputs = generate_proposals(plan, bodies, live_pages, events)
-    outputs |= build_overview_proposal(plan, live_pages, events)
+    outputs = generate_proposals(plan, bodies, live_pages, events, live_revs)
+    outputs |= build_overview_proposal(plan, live_pages, events, live_revs)
 
     # Pages whose KI region a human edited: their text is knowledge the KB does
     # not have yet. Write it out for a human to move into

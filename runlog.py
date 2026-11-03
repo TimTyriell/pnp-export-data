@@ -36,7 +36,7 @@ def run_id() -> str:
     global _RUN_ID
     if _RUN_ID is None:
         _RUN_ID = os.environ.get("PNP_RUN_ID") or (
-            f"{_dt.datetime.now(_dt.timezone.utc):%Y%m%dT%H%M%SZ}-{os.getpid()}"
+            f"{_dt.datetime.now(_dt.UTC):%Y%m%dT%H%M%SZ}-{os.getpid()}"
         )
     return _RUN_ID
 
@@ -56,7 +56,7 @@ def log(stage: str, event: str, *, level: str = "info", echo: str | None = None,
     """
 
     record = {
-        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "ts": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         "run_id": run_id(),
         "stage": stage,
         "event": event,

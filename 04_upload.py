@@ -1,4 +1,4 @@
-﻿"""Stage 4 â€” Upload: push approved proposals to the wiki (gated).
+"""Stage 4 — Upload: push approved proposals to the wiki (gated).
 
 Reads the reviewed .wikitext files from config.PROPOSALS_DIR and edits the
 corresponding wiki pages via the MediaWiki API. This is the only stage that
@@ -11,7 +11,7 @@ Two hard rules enforced here (see AGENTS.md "The review gate"):
 
   * **The agent never creates pages.** Only proposals the stage-2 plan marked
     ``update`` (i.e. the page already exists on the wiki) are uploaded.
-    ``create`` proposals are skipped â€” a human initializes those pages
+    ``create`` proposals are skipped — a human initializes those pages
     manually from proposals/NEW_PAGES.md, and the next sync fills them via
     the update path.
   * Uploads target the page title as-is (an existing page). The
@@ -35,6 +35,13 @@ from wiki_client import WikiClient
 
 _STAGE = "04_upload"
 
+# What a refused edit most likely means, printed next to the failure.
+_HINTS = {
+    "editconflict": "page changed since stage 3 — re-run 01→03 and review the new diff",
+    "missingtitle": "page was deleted on the wiki — not recreated",
+    "articleexists": "page exists now — re-run 01→03 so it is planned as an update",
+}
+
 
 def _load_plan() -> list[dict] | None:
     plan_path = config.WIKI_CACHE_DIR / "entities.json"
@@ -48,8 +55,8 @@ def _titles_by_stem(plan: list[dict]) -> dict[str, str]:
 
     A filename cannot hold every character a wiki title can ("/" makes a
     subpage on the wiki but is a path separator here), so the stem is a lossy
-    form. Taking the title from it uploaded "Katze (Ajani / GÃ¼nther)" as
-    "Katze (Ajani _ GÃ¼nther)", which the wiki then stored with a space. The
+    form. Taking the title from it uploaded "Katze (Ajani / Günther)" as
+    "Katze (Ajani _ Günther)", which the wiki then stored with a space. The
     plan is where the title actually lives.
     """
 
@@ -60,7 +67,7 @@ def _update_titles(plan: list[dict]) -> set[str]:
     """Wiki titles the plan marked ``update``."""
 
     titles = {e["wiki_title"] for e in plan if e.get("action") == "update"}
-    # Not a concept, so never in the plan â€” but it is an existing page that
+    # Not a concept, so never in the plan — but it is an existing page that
     # stage 3 merged, and it must go up the same way (see render_story_overview).
     if config.STORY_OVERVIEW_PAGE:
         titles.add(config.STORY_OVERVIEW_PAGE)
@@ -76,7 +83,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
     a decision a human makes per batch. MediaWiki's ``action=edit`` creates a
     missing page with the same call, so there is no second code path.
 
-    *only* restricts the run to titles containing that substring â€” how a big
+    *only* restricts the run to titles containing that substring — how a big
     batch gets rolled out: one page live, look at it, then the rest.
     """
 
@@ -86,7 +93,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
     if not config.PROPOSALS_DIR.exists():
         runlog.log(
             _STAGE, "abort", level="warn", reason="no_proposals_dir",
-            echo="No proposals/ directory â€” run stage 3 first.",
+            echo="No proposals/ directory — run stage 3 first.",
         )
         return
 
@@ -106,7 +113,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
     if plan is None:
         runlog.log(
             _STAGE, "abort", level="warn", reason="no_plan",
-            echo="wiki_cache/entities.json missing â€” cannot tell updates from "
+            echo="wiki_cache/entities.json missing — cannot tell updates from "
                  "new pages. Run 02_extract.py first (the agent never creates "
                  "pages).",
         )
@@ -126,21 +133,38 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
         # Pages with no plan entry (the episode overview) keep the stem.
         title = title_by_stem.get(path.stem, path.stem)
         if title not in updates and not create:
-            skipped_new += 1  # a proposed *new* page â€” humans create these
+            skipped_new += 1  # a proposed *new* page — humans create these
             runlog.log(_STAGE, "skip", title=title, reason="create")
             continue
-        # An empty .diff means the merge produced the live page verbatim â€” the
+        # An empty .diff means the merge produced the live page verbatim — the
         # edit would come back as "nochange" after a full round trip plus
-        # EDIT_DELAY_S. Skip it. A *missing* .diff is not proof of anything
-        # (older run, hand-dropped file), so that still uploads.
+        # EDIT_DELAY_S. Skip it. Stage 3 writes a .diff for every update, so a
+        # *missing* one is suspect (hand-dropped, or stale) — skip it too.
         diff_path = path.with_suffix(".diff")
+        if title in updates and not diff_path.exists():
+            runlog.log(_STAGE, "skip", level="warn", title=title, reason="no_diff")
+            continue
         if diff_path.exists() and not diff_path.read_text(encoding="utf-8").strip():
             unchanged += 1
             runlog.log(_STAGE, "skip", title=title, reason="unchanged")
             continue
+        # The live revision stage 3 merged against. Without it the edit cannot
+        # detect a conflict, so an update never goes out blind.
+        # An empty or unreadable sidecar is the same as none: the edit would go
+        # out without basetimestamp.
+        base = None
+        if title in updates:
+            try:
+                sidecar = json.loads(path.with_suffix(".base.json").read_text(encoding="utf-8"))
+                base = sidecar["basetimestamp"] or None
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+            if base is None:
+                runlog.log(_STAGE, "skip", level="warn", title=title, reason="no_base")
+                continue
         text = path.read_text(encoding="utf-8")
         # sha8 + mtime tie this upload to the stage-3 `write` event that
-        # produced the file â€” proposals/ keeps files from older runs.
+        # produced the file — proposals/ keeps files from older runs.
         meta = {
             "title": title,
             "bytes": len(text),
@@ -150,24 +174,44 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
             ),
         }
         if do_apply:
-            result = client.edit(title, text, summary="pnp-fandom-service update")
+            if base is not None:
+                result = client.edit(
+                    title, text, config.EDIT_SUMMARY,
+                    basetimestamp=base, nocreate=True,
+                )
+            else:
+                result = client.edit(
+                    title, text, config.EDIT_SUMMARY, nocreate=False, createonly=True,
+                )
             # The API answers 200 with an {"error": ...} body for a refused
-            # edit (rate limit, protection, bad token). Reporting that as an
-            # upload loses edits silently, so inspect it.
+            # edit (conflict, rate limit, protection, bad token), and with
+            # edit.result "Failure" for a captcha or abuse filter. Neither is
+            # an upload.
+            edit = result.get("edit") or {}
             if "error" in result:
                 err = result["error"]
-                failures.append((title, err.get("info") or err.get("code", "?")))
+                code = err.get("code", "?")
+                info = err.get("info") or code
+            elif edit.get("result") != "Success":
+                code = edit.get("result", "?")
+                info = json.dumps(edit)[:300]
+            else:
+                code = None
+            if code is not None:
+                hint = _HINTS.get(code, "")
+                failures.append((title, info))
                 runlog.log(
                     _STAGE, "upload_failed", level="error", **meta,
-                    code=err.get("code", "?"), info=err.get("info", ""),
-                    echo=f"FAILED {title}: {err.get('code', '?')} â€” {err.get('info', '')}",
+                    code=code, info=info, hint=hint,
+                    echo=f"FAILED {title}: {code} — {info}" + (f"\n  -> {hint}" if hint else ""),
                 )
             else:
                 uploaded += 1
                 runlog.log(
                     _STAGE, "upload", **meta, dry_run=False,
-                    result=str(result.get("edit", result)),
-                    echo=f"Uploaded {title}: {result.get('edit', result)}",
+                    result=str(edit), newrevid=edit.get("newrevid"),
+                    nochange="nochange" in edit,
+                    echo=f"Uploaded {title}: {edit}",
                 )
             time.sleep(config.EDIT_DELAY_S)
         else:
@@ -185,7 +229,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
             f"{unchanged} unchanged (empty diff, skipped); "
             + (
                 f"{skipped_new} new-page proposal(s) skipped (see NEW_PAGES.md "
-                "â€” create those manually, or re-run with --create)."
+                "— create those manually, or re-run with --create)."
                 if not create
                 else "new pages included (--create)."
             )
@@ -196,7 +240,7 @@ def main(apply: bool, create: bool = False, only: str | None = None) -> None:
         for title, info in failures:
             print(f"  {title}: {info}")
         print(
-            "Re-run to finish â€” edits are idempotent, pages already written "
+            "Re-run to finish — edits are idempotent, pages already written "
             "come back as 'nochange'."
         )
     if not do_apply:
