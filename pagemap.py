@@ -106,6 +106,10 @@ def group(concepts: list[dict], pagemap: dict, events: list[dict] | None = None)
     """
 
     by_id = {c["concept"]: c for c in concepts}
+    # The map may name a concept by its KB uid (pnp-knowledge ADR-007) instead
+    # of its concept id: the uid survives a re-extraction that renames the id.
+    by_uid = {c["uid"]: c["concept"] for c in concepts if c.get("uid")}
+    exclude = {by_uid.get(c, c) for c in pagemap["exclude"]}
     consumed: set[str] = set()
     units: list[dict] = []
 
@@ -113,10 +117,11 @@ def group(concepts: list[dict], pagemap: dict, events: list[dict] | None = None)
         members: list[dict] = []
         missing: list[str] = []
         for role in ("lead", "sub"):
-            for cid in spec[role]:
+            for ref in spec[role]:
+                cid = by_uid.get(ref, ref)
                 concept = by_id.get(cid)
                 if concept is None:
-                    missing.append(cid)
+                    missing.append(ref)
                     continue
                 members.append(
                     {"concept": cid, "role": role, "title": _title_of(concept)}
@@ -176,7 +181,7 @@ def group(concepts: list[dict], pagemap: dict, events: list[dict] | None = None)
 
     for concept in concepts:
         cid = concept["concept"]
-        if cid in pagemap["exclude"]:
+        if cid in exclude:
             if events is not None:
                 events.append(
                     {

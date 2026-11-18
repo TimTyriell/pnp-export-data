@@ -221,6 +221,9 @@ def plan_entities(
         entry = {
             "concept": c["concept"],
             "id": c.get("id"),
+            # Stable across KB re-extractions (pnp-knowledge ADR-007); absent
+            # until the KB has run with uids.
+            **({"uid": c["uid"]} if c.get("uid") else {}),
             "type": c.get("type"),
             "title": title,
             "wiki_title": matched or wiki_safe_title(title),
