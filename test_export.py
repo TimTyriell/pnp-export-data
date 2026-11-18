@@ -1260,3 +1260,21 @@ def test_summary_is_one_constant_used_by_the_report(monkeypatch):
 
     monkeypatch.setattr(config, "WIKI_USERNAME", "bot@noah")
     assert report.ki_edits(Client()) == {"Die Hexe": "2026-01-02"}
+
+
+def test_group_accepts_kb_uids_in_the_map():
+    # pnp-knowledge ADR-007: a uid survives a KB re-extraction that renames the
+    # concept id, so the map may name members by uid.
+    belorus = {**_BELORUS, "concept": "npcs/belorus_der_stille", "uid": "c_aaaaaaaa"}
+    armee = {**_ARMEE, "uid": "c_bbbbbbbb"}
+    gone = {**_CONCEPTS[0], "uid": "c_cccccccc"}
+    page_map = {
+        "exclude": {"c_cccccccc"},
+        "pages": {"Belorus der Stille": {"lead": ["c_aaaaaaaa"], "sub": ["c_bbbbbbbb"], "aliases": []}},
+    }
+    units = pagemap.group([belorus, armee, gone], page_map)
+    assert [u["title"] for u in units] == ["Belorus der Stille"]
+    assert [(m["concept"], m["role"]) for m in units[0]["members"]] == [
+        ("npcs/belorus_der_stille", "lead"),
+        ("factions/belorus_untotenarmee", "sub"),
+    ]
