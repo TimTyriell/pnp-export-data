@@ -1,0 +1,105 @@
+# Seitenleiste ("Infobox Charakter") fuer Spielercharaktere, deren Wiki-Seite
+# noch keine hat. Nur Eintraege hier bekommen eine; was fehlt, steht als "-".
+# Vorhandene Infoboxen werden nie angefasst (infobox.py). Quelle: pnp-crawl
+# groups/ (Darsteller, Gruppe) + KB-Body (Spezies, Beruf). "Bild" leer, wenn es
+# im Wiki kein Bild gibt.
+# Nach Aenderung: python 03_generate.py
+
+["Brim"]
+Darsteller = "Kevin"
+Beruf = "Krieger / Slayer"
+Spezies = "Zwerg"
+
+["Cookie"]
+Darsteller = "Celin"
+"Zugehörigkeit" = "Dwarfmasters-Gilde"
+Beruf = "Rangerin"
+Spezies = "Ribbit (Frosch)"
+Geschlecht = "Weiblich"
+Klasse = "Ranger"
+Beschreibung = "Froschartige Abenteurerin mit Kurzbogen und Naturmagie, begleitet von Perry. Gestorben im Kampf gegen einen Lich."
+
+["Esterossa"]
+Darsteller = "Basti"
+"Zugehörigkeit" = "Rotunas Helden"
+Beruf = "Kämpfer und Heiler"
+Spezies = "Seraph"
+Geschlecht = "Männlich"
+Klasse = "Seraph"
+Unterklasse = "Winged Sentinel"
+Beschreibung = "Geflügelter Kämpfer in schwerer Rüstung, dem Blutgott Korn verbunden."
+
+["Gunther"]
+Darsteller = "Heiko"
+"Zugehörigkeit" = "Rotunas Helden"
+Beruf = "Spion / Diplomat"
+Spezies = "Halb-Halbling-Goblin"
+Beschreibung = "Adliger in feiner Kleidung mit viel Etikette, im Auftrag einer unbekannten Organisation unterwegs."
+
+["Lunara Velora"]
+Bild = "[[Datei:Lunara.png|mini]]"
+Darsteller = "Celin"
+"Zugehörigkeit" = "Rotunas Helden"
+Beruf = "Hexe"
+Spezies = "Halb-Tidekin, Halb-Hexe"
+Geschlecht = "Weiblich"
+Beschreibung = "Schlanke junge Hexe mit weißen, zu zwei Zöpfen geflochtenen Haaren und mondhell schimmernden Augen."
+
+["Nyrella"]
+Darsteller = "Katha"
+"Zugehörigkeit" = "Rotunas Helden"
+Beruf = "Waldläuferin"
+Spezies = "Faery (Schneefaery)"
+Geschlecht = "Weiblich"
+Beschreibung = "Kleine geflügelte Faery mit Bogen und Eismagie, reist mit ihrem Eisbären Nyruk."
+
+["Valeria"]
+Darsteller = "Benjamin"
+"Zugehörigkeit" = "Rotunas Helden"
+Beruf = "Feuermagierin"
+Spezies = "Simja"
+Geschlecht = "Weiblich"
+Beschreibung = "Kleine, affenartige Feuermagierin, die Rotunas oft auf der Schulter reitet."
+
+["Bruma Stormrak"]
+Darsteller = "Miguel"
+"Zugehörigkeit" = "Ringtal Abenteurer"
+Beruf = "Sturmmagier"
+Spezies = "Drakona"
+Geschlecht = "Männlich"
+"Körpergröße" = "über 2 m"
+Beschreibung = "Ruhiger Magier mit blauen Schuppen und überdimensioniertem Spulenstab, spezialisiert auf Sturm und Blitz."
+
+["Kaya"]
+Bild = "[[Datei:Kaya.png|mini]]"
+Darsteller = "Tina"
+"Zugehörigkeit" = "Ringtal Abenteurer"
+Beruf = "Bardin"
+Spezies = "Faun"
+Geschlecht = "Weiblich"
+Klasse = "Barde"
+Beschreibung = "Lebenslustige, freche Faunenbardin mit Laute."
+
+["Saris"]
+Darsteller = "Micha"
+"Zugehörigkeit" = "Ringtal Abenteurer"
+Beruf = "Wissenschaftler / Hexenmeister"
+Spezies = "Tiefling"
+Geschlecht = "Männlich"
+Beschreibung = "Wissbegieriger Nekromant mit zwei sprechenden Totenköpfen, Jonathan und Samuel, auf den Schultern."
+
+["Dante"]
+Darsteller = "Henni"
+Beruf = "Ehemaliger Vampirjäger"
+Spezies = "Revenant"
+Geschlecht = "Männlich"
+Beschreibung = "Adliger aus Willauch, nach beinahe Verhungern als Wiedergänger zurückgekehrt."
+
+["Otis"]
+Darsteller = "Nils"
+"Zugehörigkeit" = "Rotunas Helden"
+Beruf = "Abenteurer"
+Spezies = "Mensch"
+Geschlecht = "Männlich"
+Klasse = "Ranger"
+Beschreibung = "Großgewachsener, außergewöhnlich starker Mensch aus einem Steinbruch, kämpft mit Hammer und Bogen."

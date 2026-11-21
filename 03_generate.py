@@ -33,6 +33,7 @@ import unicodedata
 import requests
 
 import config
+import infobox
 import pagemap
 import runlog
 import wikimerge
@@ -49,6 +50,7 @@ from wikimerge import _HEADING_RE, _norm, merge_wikitext_verbose
 extract = importlib.import_module("02_extract")
 
 _STAGE = "03_generate"
+CHAR_INFOBOX = infobox.load()
 
 
 def detect_anomalies(title: str, decisions: dict, wikitext: str) -> list[dict]:
@@ -412,6 +414,9 @@ def generate_proposals(
                 continue
             wikitext, decisions = merge_wikitext_verbose(
                 live, kb_wikitext, entity["wiki_title"], composed
+            )
+            wikitext = infobox.add_infobox(
+                wikitext, entity["wiki_title"], CHAR_INFOBOX
             )
             if events is not None:
                 events.append(

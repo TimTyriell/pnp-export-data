@@ -276,3 +276,13 @@ def test_label_separates_the_two_halves_and_appears_once():
     assert synced.index(KI_LABEL) < synced.index("Nox lebt.")
     # Re-syncing does not stack a second label.
     assert merge_wikitext(synced, _KB_V2, "Nox").count(KI_LABEL) == 1
+
+
+def test_add_infobox():
+    import infobox
+    d = {"Kaya": {"Darsteller": "Tina"}}
+    out = infobox.add_infobox("Text", "Kaya", d)
+    assert out.startswith("{{Infobox Charakter") and "|Name         = Kaya" in out
+    assert "|Level        = -" in out and "|Bild         = \n" in out
+    assert infobox.add_infobox("{{Infobox_Charakter|Name=x}}", "Kaya", d) == "{{Infobox_Charakter|Name=x}}"
+    assert infobox.add_infobox("Text", "Anderer", d) == "Text"
